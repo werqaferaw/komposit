@@ -9,7 +9,7 @@ import { dirname, join } from "node:path";
 import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { esGuidance } from "../harness/guidance.mjs";
 import { BEHAVIOR } from "../harness/behavior.mjs";
-import { findClaude, userEnv } from "../shellenv.mjs";
+import { findClaude, userEnv, isBrokenClaude, brokenClaudeMessage } from "../shellenv.mjs";
 import { DATA_DIR } from "../config.mjs";
 import platform from "../platform/index.mjs";
 
@@ -114,7 +114,20 @@ export async function runCliTurn({ app = "illustrator", userText, emit = () => {
     // Own process group (Mac), so Stop can kill claude AND the doc server it
     // spawned (a plain kill orphans the doc server, which keeps driving the
     // document). On Windows, killTree ends the tree with taskkill /T.
-    const child = spawn(claude, args, { cwd: WORK_DIR, stdio: [VIA_STDIN ? "pipe" : "ignore", "pipe", "pipe"], env: childEnv, ...platform.groupSpawnOptions });
+    // spawn() can throw instead of emitting "error" (ENOEXEC: a placeholder
+    // left by an unfinished Claude Code update), so both paths are handled.
+    const startFailed = (e) => {
+      if (isBrokenClaude(e)) emit({ type: "error", message: brokenClaudeMessage(claude), code: "claude_broken" });
+      else emit({ type: "error", message: `Could not start Claude Code: ${e.message}`, code: "claude_spawn" });
+      for (const p of refPaths) rmSync(p, { force: true });
+      resolve();
+    };
+    let child;
+    try {
+      child = spawn(claude, args, { cwd: WORK_DIR, stdio: [VIA_STDIN ? "pipe" : "ignore", "pipe", "pipe"], env: childEnv, ...platform.groupSpawnOptions });
+    } catch (e) {
+      return startFailed(e);
+    }
     if (VIA_STDIN) {
       child.stdin.on("error", () => {});
       child.stdin.end(promptText);
@@ -146,10 +159,7 @@ export async function runCliTurn({ app = "illustrator", userText, emit = () => {
 
     let stderr = "";
     child.stderr.on("data", (c) => (stderr += c));
-    child.on("error", (e) => {
-      emit({ type: "error", message: `Could not start Claude Code: ${e.message}`, code: "claude_spawn" });
-      resolve();
-    });
+    child.on("error", startFailed);
     child.on("close", (code) => {
       if (signal) signal.removeEventListener("abort", kill);
       if (signal?.aborted) {
@@ -157,7 +167,9 @@ export async function runCliTurn({ app = "illustrator", userText, emit = () => {
         result = ctx.sessionId ? { sessionId: ctx.sessionId } : {};
       } else if (code !== 0 && code !== null && !ctx.gotResult) {
         const msg = stderr.trim();
-        if (/not logged in|please run \/login|authentication|invalid api key|oauth/i.test(msg)) {
+        if (isBrokenClaude(null, msg)) {
+          emit({ type: "error", message: brokenClaudeMessage(claude), code: "claude_broken" });
+        } else if (/not logged in|please run \/login|authentication|invalid api key|oauth/i.test(msg)) {
           emit({ type: "error", message: "Claude Code is not signed in. Run `claude` in Terminal once to sign in, then try again.", code: "claude_auth" });
         } else if (resume && /session|resume|conversation/i.test(msg)) {
           emit({ type: "error", message: "Couldn't continue the earlier Claude Code session; your next message starts a fresh one.", code: "claude_resume" });

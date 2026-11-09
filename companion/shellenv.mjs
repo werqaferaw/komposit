@@ -4,15 +4,19 @@
 // registry, which has programs installed since sign-in), and also look in the
 // usual install locations, so Claude Code is found however it was installed.
 import { execFile } from "node:child_process";
-import { existsSync, accessSync, constants } from "node:fs";
+import { existsSync, accessSync, constants, realpathSync } from "node:fs";
 import { join, dirname, delimiter } from "node:path";
 import platform from "./platform/index.mjs";
 
 function run(cmd, args, { timeout = 8000, env } = {}) {
   return new Promise((resolve) => {
-    execFile(cmd, args, { timeout, env, encoding: "utf8", maxBuffer: 1 << 20, windowsHide: true }, (err, stdout, stderr) => {
-      resolve({ code: err ? (typeof err.code === "number" ? err.code : 1) : 0, stdout: stdout || "", stderr: stderr || "", err });
-    });
+    try {
+      execFile(cmd, args, { timeout, env, encoding: "utf8", maxBuffer: 1 << 20, windowsHide: true }, (err, stdout, stderr) => {
+        resolve({ code: err ? (typeof err.code === "number" ? err.code : 1) : 0, stdout: stdout || "", stderr: stderr || "", err });
+      });
+    } catch (err) {
+      resolve({ code: 1, stdout: "", stderr: "", err }); // e.g. ENOEXEC thrown by spawn
+    }
   });
 }
 
@@ -71,6 +75,29 @@ export async function findClaude() {
   return null;
 }
 
+// A `claude` that exists but can't run: an update that didn't finish leaves a
+// placeholder script behind (ENOEXEC), or a binary for the wrong CPU.
+const BROKEN_RE = /native binary not installed|ENOEXEC|exec format error|bad CPU type/i;
+export function isBrokenClaude(err, output = "") {
+  return ["ENOEXEC", "EACCES"].includes(err?.code) || BROKEN_RE.test(`${err?.message || ""}\n${output}`);
+}
+
+// How to reinstall: npm installs are fixed with npm, everything else with the
+// official installer.
+export function reinstallCommand(path) {
+  let real = path || "";
+  try {
+    real = realpathSync(real);
+  } catch {}
+  if (/node_modules[\\/]@anthropic-ai[\\/]claude-code/.test(real)) return "npm install -g @anthropic-ai/claude-code";
+  return platform.name === "win" ? "irm https://claude.ai/install.ps1 | iex" : "curl -fsSL https://claude.ai/install.sh | bash";
+}
+
+export function brokenClaudeMessage(path) {
+  const shell = platform.name === "win" ? "PowerShell" : "Terminal";
+  return `Claude Code's install looks broken, usually from an update that didn't finish. Reinstall it in ${shell} with \`${reinstallCommand(path)}\`, then try again.`;
+}
+
 // Is Claude Code installed, and signed in to a Claude account?
 // Cached briefly; `fresh` forces a re-check (after the user signs in).
 let _status = null;
@@ -89,6 +116,11 @@ export async function claudeStatus({ fresh = false } = {}) {
     run(path, ["auth", "status", "--json"], { env, timeout: 15000 }),
   ]);
   const version = (/(\d+\.\d+\.\d+)/.exec(ver.stdout) || [])[1] || null;
+  if (!version && isBrokenClaude(ver.err, ver.stderr + ver.stdout)) {
+    _status = { installed: true, broken: true, loggedIn: false, path, reinstall: reinstallCommand(path) };
+    _statusAt = Date.now();
+    return _status;
+  }
   let info = null;
   try {
     info = JSON.parse(auth.stdout);

@@ -207,6 +207,7 @@ export async function saveAI(body = {}) {
   if (mode === "claude-code") {
     const st = await claudeStatus({ fresh: true });
     if (!st.installed) return { ok: false, error: "Claude Code isn't installed yet.", claude: st };
+    if (st.broken) return { ok: false, error: "Claude Code's install looks broken. Reinstall it, then check again.", claude: st };
     if (!st.loggedIn) return { ok: false, error: "Claude Code is installed but not signed in.", claude: st };
     updateConfig((x) => {
       x.ai.mode = "claude-code";

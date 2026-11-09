@@ -419,6 +419,9 @@ function aiChooser(box, setup, { saveLabel = "Save", onSaved } = {}) {
       if (!cl.installed) st = `<div class="status-line bad">${ic("xCircle")}<span>Claude Code isn't installed on this ${w("device")}.</span></div>
         <div class="muted">Paste this into ${w("shell")}, then run <kbd>claude</kbd> once and sign in with your Claude account.</div>
         <div class="copyrow"><code>${esc(w("installClaude"))}</code><button class="btn small" data-copy="${esc(w("installClaude"))}">${ic("copy")} Copy</button></div>`;
+      else if (cl.broken) st = `<div class="status-line bad">${ic("xCircle")}<span>Claude Code's install looks broken, usually from an update that didn't finish.</span></div>
+        <div class="muted">Reinstall it by pasting this into ${w("shell")}, then check again.</div>
+        <div class="copyrow"><code>${esc(cl.reinstall)}</code><button class="btn small" data-copy="${esc(cl.reinstall)}">${ic("copy")} Copy</button></div>`;
       else if (!cl.loggedIn) st = `<div class="status-line warn">${ic("alert")}<span>Claude Code is installed but not signed in.</span></div>
         <div class="muted">Open ${w("shell")}, run <kbd>claude</kbd>, and sign in with your Claude account. Then check again.</div>`;
       else st = `<div class="status-line ok">${ic("checkCircle")}<span>Claude Code is signed in${cl.subscriptionType ? ` (${esc(cap(cl.subscriptionType))} plan)` : ""}.</span></div>`;
@@ -1006,7 +1009,7 @@ function paintTurn(v) {
     if (automationBlocked || /not allowed to control/i.test(msg)) {
       const b = el("button", "btn small", "Open System Settings"); b.onclick = () => postJSON("/api/setup/settings", { pane: "automation" }).catch(() => {}); row.append(b);
     }
-    if (["claude_missing", "claude_auth", "auth", "permission", "setup_required"].includes(code)) {
+    if (["claude_missing", "claude_auth", "claude_broken", "auth", "permission", "setup_required"].includes(code)) {
       const b = el("button", "btn small", "Open Settings"); b.onclick = () => openSettings(); row.append(b);
     }
     if (row.children.length) n.append(row);
