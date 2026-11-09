@@ -15,7 +15,7 @@ const add = (dir, depth, test) => {
     else if (st.isFile() && test(n)) files.push(rel);
   }
 };
-add("companion", 1, (n) => n.endsWith(".mjs")); // companion/*.mjs and companion/*/*.mjs
+add("companion", 2, (n) => n.endsWith(".mjs")); // companion/*.mjs, companion/*/*.mjs and harness/core/*.mjs
 files.push(join("ui", "app.js"), join("ui", "horizon.js"), join("web", "build.mjs"));
 add(join("packaging", "windows"), 0, (n) => n.endsWith(".mjs"));
 add("scripts", 0, (n) => n.endsWith(".mjs"));

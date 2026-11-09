@@ -12,8 +12,14 @@
 //   - eager_input_streaming on our tools; inputs are validated before running
 //
 // Works against api.anthropic.com with the tester's key, or against the invite
-// gateway (same API) with an invite code in place of the key.
+// gateway (same API) with an invite code in place of the key. Runs in Node (the
+// local server) and in the web page, where the SDK calls the API straight from
+// the browser: the key never leaves the page except to go to the API.
 import Anthropic from "@anthropic-ai/sdk";
+
+// In a page the SDK refuses to run unless told the key is the person's own,
+// typed into this page (it also adds the header Anthropic's CORS needs).
+const IN_BROWSER = typeof window !== "undefined" && typeof document !== "undefined";
 
 export const DEFAULT_MODEL = "claude-opus-5-5";
 
@@ -27,6 +33,7 @@ function clientFor({ apiKey, baseUrl } = {}) {
     c = new Anthropic({
       apiKey,
       ...(baseUrl ? { baseURL: baseUrl } : {}),
+      ...(IN_BROWSER ? { dangerouslyAllowBrowser: true } : {}),
       maxRetries: 2,
       timeout: 15 * 60 * 1000, // long thinking turns stream for minutes
     });

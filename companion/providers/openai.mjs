@@ -227,16 +227,26 @@ async function stream({
     if (chunk && typeof chunk === "object") handleChunk(chunk);
   };
 
-  // Leaving this loop early (break or throw) cancels the body, closing the connection.
-  read: for await (const bytes of res.body) {
-    const s = decoder.decode(bytes, { stream: true });
-    if (!sawData && head.length < 1_000_000) head += s;
-    buf += s;
-    for (let nl; (nl = buf.indexOf("\n")) !== -1; ) {
-      onLine(buf.slice(0, nl));
-      buf = buf.slice(nl + 1);
-      if (done) break read;
+  // A reader rather than `for await` over the body, so the same code runs in
+  // every browser the page supports. Leaving early (done, or a throw) cancels
+  // the body, closing the connection.
+  const reader = res.body.getReader();
+  try {
+    read: for (;;) {
+      const { value: bytes, done: ended } = await reader.read();
+      if (ended) break;
+      const s = decoder.decode(bytes, { stream: true });
+      if (!sawData && head.length < 1_000_000) head += s;
+      buf += s;
+      for (let nl; (nl = buf.indexOf("\n")) !== -1; ) {
+        onLine(buf.slice(0, nl));
+        buf = buf.slice(nl + 1);
+        if (done) break read;
+      }
     }
+  } finally {
+    if (done) reader.cancel().catch(() => {});
+    else reader.releaseLock?.();
   }
   if (!done) onLine(buf + decoder.decode()); // a final line without a trailing newline
 
