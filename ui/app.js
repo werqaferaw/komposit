@@ -920,7 +920,14 @@ const ENGINE_LABEL = { "claude-code": "Claude subscription", anthropic: "Anthrop
 function currentLabel(vm) {
   const running = [...vm.steps].reverse().find((s) => s.kind === "tool" && s.status === "running");
   if (running?.waiting) return running.waiting;
-  return running ? running.label : vm.steps.length ? "Thinking about the next step" : "Thinking";
+  if (running) return running.label;
+  const base = vm.steps.length ? "Thinking about the next step" : "Thinking";
+  // How much it has thought so far (Claude Code), so a long plan visibly moves.
+  if (vm.thinkTokens > 0) {
+    const long = !vm.steps.length && Date.now() - vm.started > 20000;
+    return `${long ? "Planning the whole change" : base} · ${vm.thinkTokens.toLocaleString("en-US")} tokens`;
+  }
+  return base;
 }
 
 function paintHead(v) {
@@ -1099,9 +1106,10 @@ async function send(root) {
         if (c) { c.title = ev.title; renderHistory(); }
         break;
       }
-      case "note": vm.liveText = ""; vm.steps.push({ kind: "note", text: ev.text }); break;
+      case "thinking": vm.thinkTokens = ev.tokens; break;
+      case "note": vm.liveText = ""; vm.thinkTokens = 0; vm.steps.push({ kind: "note", text: ev.text }); break;
       case "text": vm.liveText += ev.delta; break;
-      case "step": vm.liveText = ""; vm.steps.push({ kind: "tool", id: ev.id, name: ev.name, label: ev.label, status: "running" }); break;
+      case "step": vm.liveText = ""; vm.thinkTokens = 0; vm.steps.push({ kind: "tool", id: ev.id, name: ev.name, label: ev.label, status: "running" }); break;
       case "step_wait": {
         const s = vm.steps.find((x) => x.kind === "tool" && x.id === ev.id);
         if (s) s.waiting = ev.text || null;

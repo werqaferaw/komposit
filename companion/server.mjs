@@ -217,6 +217,9 @@ async function handleTurn(req, res, body) {
       case "text":
         if (ev.delta) send({ type: "text", delta: ev.delta });
         return;
+      case "thinking": // live progress only, not recorded
+        send({ type: "thinking", tokens: ev.tokens });
+        return;
       case "tool_run": {
         const name = cleanToolName(ev.name);
         stepStart.set(ev.id, Date.now());

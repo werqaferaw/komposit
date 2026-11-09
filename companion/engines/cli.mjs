@@ -178,6 +178,10 @@ export async function runCliTurn({ app = "illustrator", userText, emit = () => {
 function handle(ev, emit, toolNames, ctx) {
   if (ev.type === "system" && ev.subtype === "init" && ev.session_id) {
     ctx.sessionId = ev.session_id;
+  } else if (ev.type === "system" && ev.subtype === "thinking_tokens") {
+    // Claude Code hides the thinking itself but reports how much there is:
+    // shown live, so a long silent plan doesn't look like a hang.
+    if (Number.isFinite(ev.estimated_tokens)) emit({ type: "thinking", tokens: ev.estimated_tokens });
   } else if (ev.type === "assistant") {
     for (const b of ev.message?.content || []) {
       if (b.type === "text" && b.text?.trim()) emit({ type: "note", text: b.text });
