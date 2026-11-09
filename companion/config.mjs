@@ -3,8 +3,9 @@
 //   Windows:  %APPDATA%\Komposit\config.json
 //
 // It holds the per-install access token (every browser call must present it),
-// the AI the tester chose (Claude Code, an Anthropic key, an OpenAI-compatible
-// key, or an invite code for the owner's gateway) and onboarding state.
+// the AI the tester chose (Claude Code, an Anthropic key, a Gemini key, an
+// OpenAI-compatible key, or an invite code for the owner's gateway) and
+// onboarding state.
 // Secrets in here go to exactly one place: the AI provider the tester picked.
 // The UI only ever sees hints such as "sk-ant-…3f9a".
 //
@@ -20,7 +21,7 @@ import platform from "./platform/index.mjs";
 export const DATA_DIR = process.env.KOMPOSIT_DATA_DIR || platform.defaultDataDir();
 export const CONFIG_FILE = join(DATA_DIR, "config.json");
 
-export const AI_MODES = ["claude-code", "anthropic", "openai", "invite"];
+export const AI_MODES = ["claude-code", "anthropic", "gemini", "openai", "invite"];
 
 // Where invite codes are checked and the owner's key is applied. Overridable
 // for staging; the key itself never leaves that gateway.
@@ -32,7 +33,7 @@ function blank() {
   return {
     version: 1,
     token: randomBytes(24).toString("base64url"),
-    ai: { mode: null, anthropic: {}, openai: {}, invite: {}, claudeCode: {} },
+    ai: { mode: null, anthropic: {}, gemini: {}, openai: {}, invite: {}, claudeCode: {} },
     onboarded: false,
     createdAt: new Date().toISOString(),
   };
@@ -107,6 +108,11 @@ export function publicAI() {
       hasKey: !!ai.anthropic?.apiKey,
       keyHint: keyHint(ai.anthropic?.apiKey),
       model: ai.anthropic?.model || null,
+    },
+    gemini: {
+      hasKey: !!ai.gemini?.apiKey,
+      keyHint: keyHint(ai.gemini?.apiKey),
+      model: ai.gemini?.model || null,
     },
     openai: {
       hasKey: !!ai.openai?.apiKey,

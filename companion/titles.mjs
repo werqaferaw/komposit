@@ -7,11 +7,13 @@
 //   claude-code  Haiku through the person's Claude Code, no tools, no session
 //   anthropic    Haiku on their API key
 //   invite       Haiku through the gateway (one request off the daily quota)
+//   gemini       a fast Gemini model on their key (picked when the key was saved)
 //   openai       the model they configured
 import { spawn } from "node:child_process";
 import Anthropic from "@anthropic-ai/sdk";
 import { findClaude, userEnv } from "./shellenv.mjs";
 import { DEFAULT_GATEWAY } from "./config.mjs";
+import { GEMINI, inferFlavor } from "./providers/openai.mjs";
 
 const APP_NAMES = { illustrator: "Illustrator", photoshop: "Photoshop", aftereffects: "After Effects" };
 const TITLE_MODEL = "claude-haiku-5-5";
@@ -96,8 +98,8 @@ async function viaAnthropic(prompt, creds, signal) {
 }
 
 async function viaOpenAI(prompt, o, signal) {
-  const flavor = o.flavor || (/openrouter/.test(o.baseUrl || "") ? "openrouter" : /api\.openai\.com/.test(o.baseUrl || "") ? "openai" : "generic");
-  const base = String(o.baseUrl || { openrouter: "https://openrouter.ai/api/v1", openai: "https://api.openai.com/v1" }[flavor] || "")
+  const flavor = o.flavor || inferFlavor(o.baseUrl);
+  const base = String(o.baseUrl || { openrouter: "https://openrouter.ai/api/v1", openai: "https://api.openai.com/v1", gemini: GEMINI.baseUrl }[flavor] || "")
     .replace(/\/+$/, "")
     .replace(/\/chat\/completions$/, "");
   if (!base || !o.model) return "";
@@ -109,6 +111,7 @@ async function viaOpenAI(prompt, o, signal) {
     // Reasoning models spend tokens thinking before the title: leave room.
     [flavor === "openai" ? "max_completion_tokens" : "max_tokens"]: 1000,
   };
+  if (flavor === "gemini") body.reasoning_effort = "low"; // a title needs little thought
   const r = await fetch(`${base}/chat/completions`, { method: "POST", headers, body: JSON.stringify(body), signal });
   if (!r.ok) return "";
   const j = await r.json();
@@ -126,7 +129,10 @@ export async function nameChat(ai, { text, app, files = [] } = {}) {
     if (ai?.mode === "claude-code") raw = await viaClaudeCode(prompt, ctl.signal);
     else if (ai?.mode === "anthropic") raw = await viaAnthropic(prompt, { apiKey: ai.anthropic?.apiKey, baseUrl: ai.anthropic?.baseUrl }, ctl.signal);
     else if (ai?.mode === "invite") raw = await viaAnthropic(prompt, { apiKey: ai.invite?.code, baseUrl: ai.invite?.gateway || DEFAULT_GATEWAY }, ctl.signal);
-    else if (ai?.mode === "openai") raw = await viaOpenAI(prompt, ai.openai || {}, ctl.signal);
+    else if (ai?.mode === "gemini") {
+      const g = ai.gemini || {};
+      raw = await viaOpenAI(prompt, { apiKey: g.apiKey, baseUrl: GEMINI.baseUrl, flavor: "gemini", model: g.titleModel || g.model || GEMINI.titleModels[0] }, ctl.signal);
+    } else if (ai?.mode === "openai") raw = await viaOpenAI(prompt, ai.openai || {}, ctl.signal);
     return cleanTitle(raw);
   } catch {
     return "";

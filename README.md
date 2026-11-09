@@ -27,8 +27,8 @@ the result so it can see its work, checks it, and tells you what it did.
 - **It looks before it answers.** After an edit it renders the document and
   checks the result against what you asked for.
 - **Your AI, your keys.** Use your Claude plan through Claude Code, an Anthropic
-  API key, or any OpenAI-compatible provider (OpenRouter, OpenAI, a local
-  model). Keys stay on your computer.
+  API key, a Google Gemini API key, or any OpenAI-compatible provider
+  (OpenRouter, OpenAI, a local model). Keys stay on your computer.
 - **Point by selecting.** Select something in the app and say "make this
   bigger" or "match these".
 - **Exports.** PNG, print-ready PDF (Illustrator) and MP4 (After Effects), written
@@ -46,8 +46,8 @@ the result so it can see its work, checks it, and tells you what it did.
 | **Windows** (early) | [Komposit-Setup-win.exe](https://github.com/werqaferaw/komposit/releases/latest/download/Komposit-Setup-win.exe) | Windows 10 or 11, 64-bit |
 
 Both need Illustrator, Photoshop or After Effects, and an AI: a Claude Pro or Max
-plan with [Claude Code](https://claude.com/claude-code), an Anthropic API key, or an
-OpenAI-compatible key. The builds aren't signed yet, so macOS and Windows ask
+plan with [Claude Code](https://claude.com/claude-code), an Anthropic API key, a
+Google Gemini API key, or an OpenAI-compatible key. The builds aren't signed yet, so macOS and Windows ask
 you to confirm the first launch; [Getting started](docs/getting-started.md)
 walks through it in about five minutes.
 

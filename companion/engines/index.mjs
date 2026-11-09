@@ -2,6 +2,7 @@
 //
 //   claude-code  their Claude subscription, through Claude Code on this Mac
 //   anthropic    their Anthropic API key
+//   gemini       their Google Gemini API key (the OpenAI-compatible provider)
 //   invite       the owner's key, through the invite gateway (the key never
 //                reaches this Mac; the invite code stands in for it)
 //   openai       an OpenAI-compatible key (OpenRouter, OpenAI, ...)
@@ -12,6 +13,7 @@ import { runCliTurn } from "./cli.mjs";
 import { runTurn } from "../harness/loop.mjs";
 import { getProvider } from "../providers/index.mjs";
 import { DEFAULT_MODEL } from "../providers/anthropic.mjs";
+import { GEMINI } from "../providers/openai.mjs";
 import { DEFAULT_GATEWAY } from "../config.mjs";
 import * as chats from "../chats.mjs";
 import { readSelection, selectionBlock, selectionNote } from "../harness/context.mjs";
@@ -63,6 +65,10 @@ export async function runTurnFor(ai, { chat, app, text, images, files = [], effo
     provider = getProvider("anthropic");
     creds = { apiKey: ai.invite?.code, baseUrl: ai.invite?.gateway || DEFAULT_GATEWAY };
     model = DEFAULT_MODEL;
+  } else if (ai.mode === "gemini") {
+    provider = getProvider("openai");
+    creds = { apiKey: ai.gemini?.apiKey, baseUrl: GEMINI.baseUrl, flavor: "gemini" };
+    model = ai.gemini?.model || GEMINI.models[0];
   } else if (ai.mode === "openai") {
     provider = getProvider("openai");
     creds = { apiKey: ai.openai?.apiKey, baseUrl: ai.openai?.baseUrl, flavor: ai.openai?.flavor };

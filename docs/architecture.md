@@ -25,7 +25,7 @@ Windows specifics are in [windows.md](windows.md).
                                                                    │ AppleScript (Mac) · COM / AfterFX.exe (Windows)
                                                          Illustrator · Photoshop · After Effects
 
- AI, chosen per Mac:  Claude Code (subscription) · Anthropic key · OpenAI-compatible key ·
+ AI, chosen per Mac:  Claude Code (subscription) · Anthropic key · Gemini key · OpenAI-compatible key ·
                       invite code ──▶ gateway.komposit.werq.dev (gateway/ Worker, owner's key)
 ```
 
@@ -85,7 +85,7 @@ missing token 401, form POST 415, path traversal 404.
 
 `~/Library/Application Support/Komposit/config.json` (mode 0600; Windows:
 `%APPDATA%\Komposit\config.json`): the token,
-the chosen AI (`claude-code | anthropic | openai | invite` with key/code), and
+the chosen AI (`claude-code | anthropic | gemini | openai | invite` with key/code), and
 onboarding state. Keys go only to the service the tester picked; the UI sees
 hints (`sk-ant-…3f9a`). In a repo checkout, `.env` is the fallback when no AI is
 chosen (`MODEL_PROVIDER=cli` means Claude Code).
@@ -103,8 +103,10 @@ chosen (`MODEL_PROVIDER=cli` means Claude Code).
 - **Claude Code**: found through the login-shell PATH and the usual install
   folders (`shellenv.mjs`); `claude auth status` tells signed-in and plan.
 - **AI choice**: validated before it's saved. Anthropic key via the SDK's
-  models list; OpenRouter via `/api/v1/key`; other services via `/models`;
-  invite codes via the gateway's `/v1/me`.
+  models list; Gemini via its `/models` list, which also picks the best model
+  the key can use (and a fast one for chat titles); OpenRouter via
+  `/api/v1/key`; other services via `/models`; invite codes via the gateway's
+  `/v1/me`.
 
 ### Chats: `companion/chats.mjs`
 
@@ -121,7 +123,7 @@ after a reload is polled until it ends.
 ```
 UI ── POST /api/turn {chatId?, app, effort, text, images} ─▶ server
                                                          ├─ claude-code → engines/cli.mjs
-                                                         └─ anthropic | invite | openai → harness/loop.mjs
+                                                         └─ anthropic | invite | gemini | openai → harness/loop.mjs
 UI ◀─ SSE: start · note · text · step · step_done · final · error · done ──┘
 ```
 
@@ -165,7 +167,11 @@ works inside the app bundle.
 
   Opus 5.5 rejects edited history on newer accounts, and the same rule keeps the cache hitting. Old screenshots are not pruned: cache reads make them cheap.
 - **`invite`** is the same provider pointed at the gateway, with the invite code in place of a key.
-- **`openai.mjs`** speaks Chat Completions (OpenRouter, OpenAI, others) and round-trips OpenRouter `reasoning_details`. Its safety net: if a request carrying them gets a 400, it retries once with them stripped.
+- **`openai.mjs`** speaks Chat Completions (OpenRouter, OpenAI, Gemini, others) and round-trips the model's reasoning state:
+  - OpenRouter `reasoning_details`. Its safety net: if a request carrying them gets a 400, it retries once with them stripped.
+  - Gemini's thought signatures (`extra_content.google.thought_signature` on a tool call). Each is kept on its `tool_use` block and sent back on the same call; Gemini 3 and later refuse a function call in the current turn without it. A step that never had one (made by another model earlier in the chat) gets Google's documented skip placeholder.
+  - Tool-call ids are made unique across the chat (Gemini numbers its calls afresh each step), since the UI's steps and the tool results are matched by id.
+- **`gemini`** is that provider pointed at `https://generativelanguage.googleapis.com/v1beta/openai` with the person's AI Studio key; the effort picker becomes Gemini's thinking level.
 
 ### The tools and the bridges
 
@@ -340,7 +346,7 @@ the first real-PC test: [windows-testing.md](windows-testing.md).
 
 | Command | Covers |
 |---|---|
-| `npm test` | API engine: request shape (Opus 5.5, betas, fallbacks, effort, caching, eager tools), parsing, append-only history across turns and app switches, refusals, invalid tool input; tools, selection, attachments; incident log; the Windows platform layer (`win.test.mjs`); chat titles; OpenAI-compatible provider |
+| `npm test` | API engine: request shape (Opus 5.5, betas, fallbacks, effort, caching, eager tools), parsing, append-only history across turns and app switches, refusals, invalid tool input; tools, selection, attachments; incident log; the Windows platform layer (`win.test.mjs`); chat titles; Gemini (signatures round trip, key check, titles); OpenAI-compatible provider |
 | `npm run test:live [-- app]` | the above plus live checks: Illustrator export/save/preflight/selection, Photoshop inspect, After Effects selection/frames/preview/MP4 |
 | `cd gateway && npm test` | the invite gateway against a mock Anthropic |
 | `npm run check` | syntax of every module, the UI and the build scripts |
@@ -385,7 +391,7 @@ companion/
   mcp/doc-server.mjs  Komposit tools over MCP (stdio)
   bridges/          extendscript.mjs (envelope, transport via platform/) · illustrator · photoshop · aftereffects
                     · files.mjs (export paths)
-  test/             api-engine · tools · incidents · win · titles · openai-provider (unit)
+  test/             api-engine · tools · incidents · win · titles · gemini · openai-provider (unit)
                     · illustrator.live · aftereffects.live
 ui/                 index.html · app.css · app.js · favicon.svg
 packaging/          build-mac.sh · release-mac.sh · verify-dmg.sh · publish-release.sh

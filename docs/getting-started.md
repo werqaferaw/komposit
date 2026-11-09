@@ -15,6 +15,7 @@ About 5 minutes from download to your first edit.
 - One of these for the AI:
   - a **Claude Pro or Max** plan, with Claude Code installed;
   - an **Anthropic API key**;
+  - a **Google Gemini API key** (free to create at [aistudio.google.com](https://aistudio.google.com), under Get API key);
   - an **OpenRouter** (or other OpenAI-compatible) key, with a model that can see images;
   - an **invite code**, if you were given one.
 

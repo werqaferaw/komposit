@@ -339,6 +339,7 @@ function renderEngine() {
   let title = "No AI chosen", sub = "Open settings";
   if (ai.mode === "claude-code") { title = "Claude subscription"; sub = "via Claude Code"; }
   else if (ai.mode === "anthropic") { title = "Anthropic API"; sub = ai.anthropic?.model || "Claude Opus 5.5"; }
+  else if (ai.mode === "gemini") { title = "Google Gemini"; sub = ai.gemini?.model || "Gemini API"; }
   else if (ai.mode === "openai") {
     let host = "";
     try { host = new URL(ai.openai.baseUrl).hostname; } catch {}
@@ -410,6 +411,7 @@ function aiChooser(box, setup, { saveLabel = "Save", onSaved } = {}) {
   const OPTIONS = [
     { id: "claude-code", t: "Claude subscription", d: `Your Claude Pro or Max plan, through Claude Code on this ${w("device")}. No API key.` },
     { id: "anthropic", t: "Anthropic API key", d: "Pay as you go with your own key. Runs Claude Opus 5.5." },
+    { id: "gemini", t: "Google Gemini API key", d: "Pay as you go with a key from Google AI Studio. Runs the best Gemini model your key can use." },
     { id: "openai", t: "OpenRouter or another OpenAI-compatible service", d: "Use a key from OpenRouter, OpenAI, or a compatible service." },
     { id: "invite", t: "Invite code", d: "Got a code from Komposit? Use it instead of your own AI account." },
   ];
@@ -431,6 +433,13 @@ function aiChooser(box, setup, { saveLabel = "Save", onSaved } = {}) {
       const saved = ai.anthropic?.hasKey ? `<div class="muted">Saved key: <kbd>${esc(ai.anthropic.keyHint)}</kbd>. Paste a new one to replace it.</div>` : "";
       return `<input class="field mono" type="password" id="f-akey" placeholder="sk-ant-..." autocomplete="off" spellcheck="false" />${saved}
         <div class="muted">Create a key at console.anthropic.com under API keys.</div>`;
+    }
+    if (id === "gemini") {
+      const g = ai.gemini || {};
+      const saved = g.hasKey ? `<div class="muted">Saved key: <kbd>${esc(g.keyHint)}</kbd>${g.model ? `, using <kbd>${esc(g.model)}</kbd>` : ""}. Paste a new one to replace it.</div>` : "";
+      return `<input class="field mono" type="password" id="f-gkey" placeholder="AIza..." autocomplete="off" spellcheck="false" />${saved}
+        <input class="field mono" id="f-gmodel" placeholder="Model (optional; the best one your key can use)" value="" autocomplete="off" spellcheck="false" />
+        <div class="muted">Create a key at aistudio.google.com under Get API key.</div>`;
     }
     if (id === "openai") {
       const cur = ai.openai || {};
@@ -473,6 +482,7 @@ function aiChooser(box, setup, { saveLabel = "Save", onSaved } = {}) {
     err.textContent = "";
     const payload = { mode: pick };
     if (pick === "anthropic") payload.apiKey = $("#f-akey", box).value.trim();
+    if (pick === "gemini") { payload.apiKey = $("#f-gkey", box).value.trim(); const m = $("#f-gmodel", box).value.trim(); if (m) payload.model = m; }
     if (pick === "openai") {
       const sel = $("#f-oprov", box).value;
       payload.baseUrl = sel === "custom" ? $("#f-obase", box).value.trim() : presets[sel]?.baseUrl;
@@ -918,7 +928,7 @@ function turnView(vm, { localImages } = {}) {
   return v;
 }
 
-const ENGINE_LABEL = { "claude-code": "Claude subscription", anthropic: "Anthropic API", openai: "OpenAI-compatible", invite: "Invite" };
+const ENGINE_LABEL = { "claude-code": "Claude subscription", anthropic: "Anthropic API", gemini: "Google Gemini", openai: "OpenAI-compatible", invite: "Invite" };
 
 function currentLabel(vm) {
   const running = [...vm.steps].reverse().find((s) => s.kind === "tool" && s.status === "running");

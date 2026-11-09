@@ -9,19 +9,43 @@
 //   stream({ system, messages, tools, model, effort, creds: { apiKey, baseUrl, flavor },
 //            maxTokens, onEvent, signal }) -> { stopReason, content, usage }
 //
-// `flavor` ("openrouter" | "openai" | "generic") selects the few wire differences:
-// attribution headers, the token-limit field, and how reasoning effort is sent.
-// When it's absent it's inferred from the base URL's host. Global fetch only.
+// `flavor` ("openrouter" | "openai" | "gemini" | "generic") selects the few wire
+// differences: attribution headers, the token-limit field, how reasoning effort
+// is sent, and which reasoning state goes back. When it's absent it's inferred
+// from the base URL's host. Global fetch only.
 //
-// Reasoning round trip (OpenRouter only): streamed reasoning_details come back as
-// a { type: "reasoning_details", details } block first in `content`; the loop
-// keeps it in the history, and the next request returns it on that assistant
-// message so the model can continue its reasoning across tool calls.
+// Reasoning round trip, so the model can continue its reasoning across tool calls:
+//   OpenRouter  streamed reasoning_details come back as a { type: "reasoning_details",
+//               details } block first in `content`; the loop keeps it in the
+//               history, and the next request returns it on that assistant message.
+//   Gemini      thought signatures ride on the tool calls (`extra_content`, e.g.
+//               { google: { thought_signature } }); they're kept on each tool_use
+//               block and sent back on the same call. Gemini 3 and later refuse a
+//               function call in the current turn without its signature.
 
 const DEFAULT_MAX_TOKENS = 16000;
-const FLAVORS = ["openrouter", "openai", "generic"];
-const DEFAULT_BASE_URL = { openrouter: "https://openrouter.ai/api/v1", openai: "https://api.openai.com/v1" };
+const GEMINI_MAX_TOKENS = 32768; // Gemini counts thinking toward the output limit
+const FLAVORS = ["openrouter", "openai", "gemini", "generic"];
+const DEFAULT_BASE_URL = {
+  openrouter: "https://openrouter.ai/api/v1",
+  openai: "https://api.openai.com/v1",
+  gemini: "https://generativelanguage.googleapis.com/v1beta/openai",
+};
+const KEY_NAME = { openrouter: "OpenRouter", openai: "OpenAI", gemini: "Gemini" };
 const SHOTS_INTRO = "Screenshots returned by the tools above:";
+
+// Google Gemini with a key from AI Studio, through its OpenAI-compatible endpoint.
+// When a key is saved, setup picks the first model in `models` the key can use
+// (best first) and the first of `titleModels` (fast) to name chats.
+export const GEMINI = {
+  baseUrl: DEFAULT_BASE_URL.gemini,
+  models: ["gemini-4-argon", "gemini-3.1-pro-preview", "gemini-3.8-flash", "gemini-3.6-flash", "gemini-3-pro-preview", "gemini-3-flash-preview", "gemini-2.5-pro"],
+  titleModels: ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3-flash-preview", "gemini-2.5-flash"],
+};
+// Google's documented placeholder for a function call that has no signature of
+// its own (made by another model earlier in the chat): it skips the check for
+// that call only, instead of failing the whole request.
+export const GEMINI_SKIP_SIGNATURE = "skip_thought_signature_validator";
 
 async function stream({
   system,
@@ -30,7 +54,7 @@ async function stream({
   model,
   effort,
   creds = {},
-  maxTokens = DEFAULT_MAX_TOKENS,
+  maxTokens,
   onEvent = () => {},
   signal,
 }) {
@@ -42,7 +66,7 @@ async function stream({
   if (!baseUrl) throw new Error("No base URL set for the OpenAI-compatible provider.");
   if (!model) throw new Error("No model set for the OpenAI-compatible provider.");
   if (!apiKey && flavor !== "generic") {
-    throw new Error(`No ${flavor === "openai" ? "OpenAI" : "OpenRouter"} API key set.`);
+    throw new Error(`No ${KEY_NAME[flavor]} API key set.`);
   }
 
   const body = {
@@ -51,7 +75,7 @@ async function stream({
     stream: true,
     stream_options: { include_usage: true },
     // OpenAI's reasoning models reject max_tokens; most other servers only know max_tokens.
-    [flavor === "openai" ? "max_completion_tokens" : "max_tokens"]: maxTokens || DEFAULT_MAX_TOKENS,
+    [flavor === "openai" ? "max_completion_tokens" : "max_tokens"]: maxTokens || (flavor === "gemini" ? GEMINI_MAX_TOKENS : DEFAULT_MAX_TOKENS),
   };
   const fnTools = toChatTools(tools);
   if (fnTools.length) {
@@ -60,6 +84,7 @@ async function stream({
   }
   if (effort) {
     if (flavor === "openrouter") body.reasoning = { effort };
+    else if (flavor === "gemini") body.reasoning_effort = effort; // low | medium | high = Gemini's thinking levels
     else if (flavor === "openai" && (model.startsWith("o") || model.startsWith("gpt-5"))) body.reasoning_effort = effort;
   }
 
@@ -95,13 +120,14 @@ async function stream({
   }
   if (!res.ok || !res.body) {
     const detail = await res.text().catch(() => "");
-    throw new Error(`Model request failed (${res.status}): ${detail.slice(0, 500)}`);
+    throw Object.assign(new Error(`Model request failed (${res.status}): ${detail.slice(0, 500)}`), { status: res.status, detail });
   }
 
   let text = "";
   let finishReason = null;
   let rawUsage = null;
-  const calls = []; // { id, name, args, started }, in order of first appearance
+  let messageExtra = null; // Gemini: extra_content on the message itself (a signature on text)
+  const calls = []; // { id, name, args, started, extra }, in order of first appearance
   const callAt = new Map(); // the server's tool_calls[].index -> position in `calls`
   const details = []; // OpenRouter reasoning_details, merged, in order of first appearance
   const detailAt = new Map(); // `${index}|${type}` -> position in `details`
@@ -122,6 +148,7 @@ async function stream({
     const thought = typeof d.reasoning === "string" && d.reasoning ? d.reasoning : d.reasoning_content;
     if (typeof thought === "string" && thought) onEvent({ type: "thinking", delta: thought });
     if (Array.isArray(d.reasoning_details)) for (const r of d.reasoning_details) addReasoningDetail(r);
+    if (isObject(d.extra_content)) messageExtra = mergeExtra(messageExtra, d.extra_content);
     if (Array.isArray(d.tool_calls)) for (const tc of d.tool_calls) if (tc) addToolDelta(tc);
     if (choice.finish_reason === "error") throw streamError('the provider ended the response with finish_reason "error"');
     if (choice.finish_reason) finishReason = choice.finish_reason;
@@ -135,7 +162,7 @@ async function stream({
     const key = Number.isInteger(tc.index) ? tc.index : "none";
     let pos = tc.id ? calls.findIndex((c) => c.id === tc.id) : -1;
     if (pos === -1 && callAt.has(key) && (!tc.id || !calls[callAt.get(key)].id)) pos = callAt.get(key);
-    if (pos === -1) pos = calls.push({ id: "", name: "", args: "", started: false }) - 1;
+    if (pos === -1) pos = calls.push({ id: "", name: "", args: "", started: false, extra: null }) - 1;
     callAt.set(key, pos);
 
     const call = calls[pos];
@@ -144,6 +171,7 @@ async function stream({
     if (fn.name && !call.name) call.name = fn.name;
     if (typeof fn.arguments === "string") call.args += fn.arguments;
     else if (fn.arguments && typeof fn.arguments === "object") call.args = JSON.stringify(fn.arguments);
+    if (isObject(tc.extra_content)) call.extra = mergeExtra(call.extra, tc.extra_content); // Gemini's thought signature
     if (!call.started && call.id && call.name) {
       call.started = true;
       onEvent({ type: "tool_use_start", id: call.id, name: call.name });
@@ -228,9 +256,19 @@ async function stream({
   // First, like a thinking block. The loop stores content as returned (keepsThinking),
   // and assistantMessages() hands it back to OpenRouter on the next request.
   if (details.length) content.push({ type: "reasoning_details", details });
+  if (messageExtra) content.push({ type: "extra_content", extra_content: messageExtra });
   if (text.trim()) content.push({ type: "text", text });
+  // Every tool call needs an id no earlier call in this chat used: the steps in
+  // the UI and the tool results are matched by it, and some servers number
+  // their calls afresh each time ("function-call-1").
+  const usedIds = new Set();
+  for (const m of messages || []) {
+    if (m?.role === "assistant" && Array.isArray(m.content)) for (const b of m.content) if (b?.type === "tool_use" && b.id) usedIds.add(b.id);
+  }
   for (const c of calls) {
-    content.push({ type: "tool_use", id: c.id || newCallId(), name: c.name, input: parseArgs(c.args) });
+    const id = c.id && !usedIds.has(c.id) ? c.id : newCallId();
+    usedIds.add(id);
+    content.push({ type: "tool_use", id, name: c.name, input: parseArgs(c.args), ...(c.extra ? { extra_content: c.extra } : {}) });
   }
   const stopReason = calls.length ? "tool_use" : finishReason === "length" ? "max_tokens" : "end_turn";
 
@@ -250,19 +288,50 @@ async function stream({
   return { stopReason, content, usage };
 }
 
-// keepsThinking: the loop stores the assistant content as returned, so the
-// reasoning_details block survives into the history. No thinkingIsProgress: raw
-// reasoning is not a progress note meant for the person.
-export const openai = { name: "openai", stream, keepsThinking: true };
+// One plain sentence for the person using the app; the full detail stays in the
+// error's message for the logs.
+export function explainError(e) {
+  const status = e?.status;
+  const detail = String(e?.detail || "");
+  if (status === 401 || status === 403 || /api key not valid|invalid api key|incorrect api key|API_KEY_INVALID/i.test(detail)) {
+    return { message: "The API key was not accepted by the AI service. Check it in Settings.", code: "auth" };
+  }
+  if (status === 429) return { message: "The AI service is rate limiting this key. Wait a moment and try again.", code: "rate_limit" };
+  if (status >= 500) return { message: `The AI service had a server problem (${status}). Try again.`, code: "server" };
+  return { message: e?.message || String(e), code: status === 400 ? "bad_request" : null };
+}
 
-function inferFlavor(baseUrl) {
+// keepsThinking: the loop stores the assistant content as returned, so the
+// reasoning_details block and Gemini's signatures survive into the history. No
+// thinkingIsProgress: raw reasoning is not a progress note meant for the person.
+export const openai = { name: "openai", stream, explainError, keepsThinking: true };
+
+export function inferFlavor(baseUrl) {
   let host = "";
   try {
     host = new URL(baseUrl).hostname;
   } catch {}
   if (host === "openrouter.ai" || host.endsWith(".openrouter.ai")) return "openrouter";
   if (host === "api.openai.com") return "openai";
+  if (host === "generativelanguage.googleapis.com") return "gemini";
   return "generic";
+}
+
+const isObject = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+
+// Fold one streamed extra_content fragment into what's collected so far: nested
+// objects merge; any other value keeps the latest non-empty one.
+function mergeExtra(into, frag) {
+  const out = isObject(into) ? { ...into } : {};
+  for (const [k, v] of Object.entries(frag)) {
+    if (isObject(v)) out[k] = mergeExtra(out[k], v);
+    else if (v !== null && v !== undefined && v !== "") out[k] = v;
+  }
+  return out;
+}
+
+function hasSignature(extra) {
+  return typeof extra?.google?.thought_signature === "string" && extra.google.thought_signature !== "";
 }
 
 // ---- Anthropic-shaped history -> Chat Completions messages ----
@@ -284,11 +353,16 @@ function assistantMessages(content, flavor) {
   const texts = [];
   const toolCalls = [];
   const details = [];
+  let messageExtra = null;
+  const gemini = flavor === "gemini";
   for (const b of Array.isArray(content) ? content : []) {
     if (b?.type === "text" && b.text) texts.push(b.text);
     else if (b?.type === "tool_use") {
-      toolCalls.push({ id: b.id, type: "function", function: { name: b.name, arguments: JSON.stringify(b.input ?? {}) } });
+      const call = { id: b.id, type: "function", function: { name: b.name, arguments: JSON.stringify(b.input ?? {}) } };
+      if (gemini && isObject(b.extra_content)) call.extra_content = b.extra_content;
+      toolCalls.push(call);
     } else if (b?.type === "reasoning_details" && Array.isArray(b.details)) details.push(...b.details);
+    else if (b?.type === "extra_content" && isObject(b.extra_content)) messageExtra = b.extra_content;
     // thinking / redacted_thinking / anything else has no Chat Completions form: dropped.
   }
   const text = texts.join("\n\n");
@@ -298,6 +372,15 @@ function assistantMessages(content, flavor) {
   // OpenRouter continues the model's reasoning across tool calls when it gets the
   // details back unmodified. Other servers don't know the field: never sent there.
   if (flavor === "openrouter" && details.length) msg.reasoning_details = details;
+  if (gemini) {
+    // Gemini wants the signature back on the call it came with. Only the first
+    // call of a step carries one; a step without (made by another model, or
+    // older history) gets Google's skip placeholder so the request still goes.
+    if (toolCalls.length && !hasSignature(toolCalls[0].extra_content)) {
+      toolCalls[0].extra_content = mergeExtra(toolCalls[0].extra_content, { google: { thought_signature: GEMINI_SKIP_SIGNATURE } });
+    }
+    if (messageExtra) msg.extra_content = messageExtra;
+  }
   return [msg];
 }
 

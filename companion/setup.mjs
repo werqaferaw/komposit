@@ -16,6 +16,7 @@ import { appManifest, getBridge } from "./bridges/index.mjs";
 import { runningApps } from "./desktop.mjs";
 import { config, updateConfig, publicAI, DEFAULT_GATEWAY, AI_MODES } from "./config.mjs";
 import { claudeStatus } from "./shellenv.mjs";
+import { GEMINI } from "./providers/openai.mjs";
 import platform from "./platform/index.mjs";
 
 // ---------- Adobe apps + Automation permission ----------
@@ -178,6 +179,42 @@ async function checkOpenAIKey({ apiKey, baseUrl }) {
   }
 }
 
+// A Gemini key: list the models it may use (the OpenAI-compatible endpoint),
+// then pick the best one for turns and a fast one for chat titles. A model the
+// person named is kept as long as the key can use it.
+export async function checkGeminiKey(apiKey, { model = "", baseUrl = GEMINI.baseUrl } = {}) {
+  let res;
+  try {
+    res = await fetch(`${baseUrl}/models`, { headers: { authorization: `Bearer ${apiKey}` }, signal: AbortSignal.timeout(15000) });
+  } catch (e) {
+    return { ok: false, error: `Could not reach Google: ${e.message}` };
+  }
+  const body = await res.text().catch(() => "");
+  // Google answers a bad key with 400 ("API key not valid") as often as 401/403.
+  if (res.status === 400 || res.status === 401 || res.status === 403) {
+    return { ok: false, error: /api key|API_KEY/i.test(body) || res.status !== 400 ? "That key was not accepted by Google." : `Google refused the check: ${body.slice(0, 200)}` };
+  }
+  if (!res.ok) return { ok: false, error: `Google answered ${res.status}.` };
+  let ids = [];
+  try {
+    ids = (JSON.parse(body).data || []).map((m) => String(m.id || "").replace(/^models\//, "")).filter(Boolean);
+  } catch {}
+  const has = (id) => ids.includes(id);
+  const want = String(model || "").trim().replace(/^models\//, "");
+  if (want && ids.length && !has(want)) return { ok: false, error: `This key can't use ${want}. Leave the model empty to use the best one available.` };
+  const chosen = want || GEMINI.models.find(has) || newestListed(ids) || GEMINI.models[0];
+  return { ok: true, model: chosen, titleModel: GEMINI.titleModels.find(has) || chosen };
+}
+
+// When Google has renamed its models since this build: the newest general
+// model the key lists (Pro-class before Flash), not a speech, image or live one.
+function newestListed(ids) {
+  const version = (id) => parseFloat((/^gemini-(\d+(?:\.\d+)?)/.exec(id) || [])[1] || "0");
+  const tier = (id) => (/pro|ultra|argon/.test(id) ? 2 : /flash/.test(id) ? 1 : 0);
+  const general = ids.filter((id) => /^gemini-\d/.test(id) && !/tts|live|embed|image|audio|transcribe|robotics|computer-use|lite/.test(id));
+  return general.sort((a, b) => version(b) - version(a) || tier(b) - tier(a))[0] || null;
+}
+
 // Ask the invite gateway who this code belongs to (and its limits).
 export async function checkInvite(code, gateway = DEFAULT_GATEWAY) {
   try {
@@ -197,6 +234,7 @@ export async function checkInvite(code, gateway = DEFAULT_GATEWAY) {
 // Save the AI choice after checking it works. Body:
 //   { mode: "claude-code" }
 //   { mode: "anthropic", apiKey, model? }
+//   { mode: "gemini", apiKey, model? }
 //   { mode: "openai", apiKey, baseUrl?|preset?, model? }
 //   { mode: "invite", code }
 export async function saveAI(body = {}) {
@@ -223,6 +261,20 @@ export async function saveAI(body = {}) {
     updateConfig((x) => {
       x.ai.mode = "anthropic";
       x.ai.anthropic = { apiKey, model: body.model || x.ai.anthropic?.model || undefined };
+    });
+    return { ok: true, ai: publicAI() };
+  }
+
+  if (mode === "gemini") {
+    const apiKey = String(body.apiKey || c.ai.gemini?.apiKey || "").trim();
+    if (!apiKey) return { ok: false, error: "Paste your Gemini API key." };
+    // A new key picks the best model afresh unless one was named; the same key keeps its model.
+    const sameKey = apiKey === c.ai.gemini?.apiKey;
+    const chk = await checkGeminiKey(apiKey, { model: body.model || (sameKey ? c.ai.gemini?.model : "") });
+    if (!chk.ok) return chk;
+    updateConfig((x) => {
+      x.ai.mode = "gemini";
+      x.ai.gemini = { apiKey, model: chk.model, titleModel: chk.titleModel };
     });
     return { ok: true, ai: publicAI() };
   }
@@ -262,7 +314,7 @@ export async function saveAI(body = {}) {
 
 export function forgetAI() {
   updateConfig((x) => {
-    x.ai = { mode: null, anthropic: {}, openai: {}, invite: {}, claudeCode: {} };
+    x.ai = { mode: null, anthropic: {}, gemini: {}, openai: {}, invite: {}, claudeCode: {} };
   });
   return { ok: true, ai: publicAI() };
 }
@@ -285,5 +337,6 @@ export async function setupStatus({ fresh = false } = {}) {
     onboarded: !!config().onboarded,
     helper: !!(await helperPath()),
     presets: OPENAI_PRESETS,
+    gemini: { models: GEMINI.models },
   };
 }

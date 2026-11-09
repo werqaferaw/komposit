@@ -7,7 +7,7 @@ Komposit is a design agent that works in your open Illustrator, Photoshop and Af
 | **Mac** | `Komposit-mac.dmg` | macOS 13.5 or later, Apple silicon or Intel |
 | **Windows (early build)** | `Komposit-Setup-win.exe` | Windows 10 or 11, 64-bit |
 
-Both need Illustrator, Photoshop or After Effects, and one of: a Claude Pro or Max plan (through Claude Code), an Anthropic API key, an OpenRouter key, or an invite code.
+Both need Illustrator, Photoshop or After Effects, and one of: a Claude Pro or Max plan (through Claude Code), an Anthropic API key, a Google Gemini API key, an OpenRouter key, or an invite code.
 
 ## First launch
 
