@@ -65,6 +65,8 @@ if [ "$VISIBILITY" != "PUBLIC" ]; then
   if [ "$MAKE_PUBLIC" = 1 ]; then
     echo "== making $REPO public"
     gh repo edit "$REPO" --visibility public --accept-visibility-change-consequences
+    # Lets people report security problems privately (SECURITY.md links to it).
+    gh api -X PUT "repos/$REPO/private-vulnerability-reporting" >/dev/null || echo "   (turn on private vulnerability reporting in the repo's Security settings)"
   else
     echo "$REPO is $VISIBILITY: its release downloads would not work." >&2
     echo "Run again with --make-public to publish the code and the release together." >&2
