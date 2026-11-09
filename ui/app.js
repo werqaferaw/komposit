@@ -338,6 +338,7 @@ function renderEngine() {
   const ai = S.status?.ai || {};
   let title = "No AI chosen", sub = "Open settings";
   if (ai.mode === "claude-code") { title = "Claude subscription"; sub = "via Claude Code"; }
+  else if (ai.mode === "codex") { title = "ChatGPT subscription"; sub = "via Codex"; }
   else if (ai.mode === "anthropic") { title = "Anthropic API"; sub = ai.anthropic?.model || "Claude Opus 5.5"; }
   else if (ai.mode === "openai") {
     let host = "";
@@ -405,10 +406,12 @@ async function obFirst() {
 function aiChooser(box, setup, { saveLabel = "Save", onSaved } = {}) {
   const ai = setup.ai || {};
   const cl = setup.claude || {};
+  const cx = setup.codex || {};
   let pick = ai.mode || (cl.installed ? "claude-code" : "anthropic");
   const presets = setup.presets || {};
   const OPTIONS = [
     { id: "claude-code", t: "Claude subscription", d: `Your Claude Pro or Max plan, through Claude Code on this ${w("device")}. No API key.` },
+    { id: "codex", t: "ChatGPT subscription (Codex)", d: `Your ChatGPT Plus or Pro plan, through Codex on this ${w("device")}. No API key.` },
     { id: "anthropic", t: "Anthropic API key", d: "Pay as you go with your own key. Runs Claude Opus 5.5." },
     { id: "openai", t: "OpenRouter or another OpenAI-compatible service", d: "Use a key from OpenRouter, OpenAI, or a compatible service." },
     { id: "invite", t: "Invite code", d: "Got a code from Komposit? Use it instead of your own AI account." },
@@ -426,6 +429,22 @@ function aiChooser(box, setup, { saveLabel = "Save", onSaved } = {}) {
         <div class="muted">Open ${w("shell")}, run <kbd>claude</kbd>, and sign in with your Claude account. Then check again.</div>`;
       else st = `<div class="status-line ok">${ic("checkCircle")}<span>Claude Code is signed in${cl.subscriptionType ? ` (${esc(cap(cl.subscriptionType))} plan)` : ""}.</span></div>`;
       return st + (cl.loggedIn ? "" : `<div><button class="btn small" data-recheck>${ic("refresh")} Check again</button></div>`);
+    }
+    if (id === "codex") {
+      const install = "npm install -g @openai/codex";
+      let st;
+      if (!cx.installed) st = `<div class="status-line bad">${ic("xCircle")}<span>Codex isn't installed on this ${w("device")}.</span></div>
+        <div class="muted">Paste this into ${w("shell")} (it needs Node.js), then run <kbd>codex login</kbd> and sign in with your ChatGPT account.</div>
+        <div class="copyrow"><code>${esc(install)}</code><button class="btn small" data-copy="${esc(install)}">${ic("copy")} Copy</button></div>`;
+      else if (cx.broken) st = `<div class="status-line bad">${ic("xCircle")}<span>Codex's install looks broken.</span></div>
+        <div class="muted">Reinstall it by pasting this into ${w("shell")}, then check again.</div>
+        <div class="copyrow"><code>${esc(cx.reinstall)}</code><button class="btn small" data-copy="${esc(cx.reinstall)}">${ic("copy")} Copy</button></div>`;
+      else if (!cx.loggedIn) st = `<div class="status-line warn">${ic("alert")}<span>Codex is installed but not signed in.</span></div>
+        <div class="muted">Open ${w("shell")}, run <kbd>codex login</kbd>, and sign in with your ChatGPT account. Then check again.</div>`;
+      else if (!cx.usesSubscription) st = `<div class="status-line warn">${ic("alert")}<span>Codex is signed in with an API key, not a ChatGPT plan.</span></div>
+        <div class="muted">Open ${w("shell")}, run <kbd>codex login</kbd>, and choose Sign in with ChatGPT. Then check again.</div>`;
+      else st = `<div class="status-line ok">${ic("checkCircle")}<span>Codex is signed in with ChatGPT.</span></div>`;
+      return st + (cx.usesSubscription ? "" : `<div><button class="btn small" data-recheck-codex>${ic("refresh")} Check again</button></div>`);
     }
     if (id === "anthropic") {
       const saved = ai.anthropic?.hasKey ? `<div class="muted">Saved key: <kbd>${esc(ai.anthropic.keyHint)}</kbd>. Paste a new one to replace it.</div>` : "";
@@ -455,6 +474,8 @@ function aiChooser(box, setup, { saveLabel = "Save", onSaved } = {}) {
     $$("[data-copy]", box).forEach((b) => (b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.copy); b.innerHTML = ic("check") + " Copied"; } catch {} }));
     const rc = $("[data-recheck]", box);
     if (rc) rc.onclick = async () => { rc.disabled = true; const s = await getJSON("/api/setup?fresh=1"); Object.assign(cl, s.claude); render(); };
+    const rcx = $("[data-recheck-codex]", box);
+    if (rcx) rcx.onclick = async () => { rcx.disabled = true; const s = await getJSON("/api/setup?fresh=1"); Object.assign(cx, s.codex || {}); render(); };
     if (pick === "openai") {
       const sel = $("#f-oprov", box), base = $("#f-obase", box), model = $("#f-omodel", box);
       sel.value = $("#f-opre", box).textContent;
@@ -483,6 +504,7 @@ function aiChooser(box, setup, { saveLabel = "Save", onSaved } = {}) {
     btn.disabled = true; btn.innerHTML = `<span class="spinner"></span> Checking`;
     try {
       const r = await postJSON("/api/setup/ai", payload);
+      if (r.codex) Object.assign(cx, r.codex);
       if (!r.ok) { err.textContent = r.error || "That didn't work."; if (r.claude) Object.assign(cl, r.claude); return; }
       if (onSaved) await onSaved(r);
     } catch (e) { err.textContent = e.message; }
@@ -918,7 +940,7 @@ function turnView(vm, { localImages } = {}) {
   return v;
 }
 
-const ENGINE_LABEL = { "claude-code": "Claude subscription", anthropic: "Anthropic API", openai: "OpenAI-compatible", invite: "Invite" };
+const ENGINE_LABEL = { "claude-code": "Claude subscription", codex: "ChatGPT subscription", anthropic: "Anthropic API", openai: "OpenAI-compatible", invite: "Invite" };
 
 function currentLabel(vm) {
   const running = [...vm.steps].reverse().find((s) => s.kind === "tool" && s.status === "running");
@@ -1009,7 +1031,7 @@ function paintTurn(v) {
     if (automationBlocked || /not allowed to control/i.test(msg)) {
       const b = el("button", "btn small", "Open System Settings"); b.onclick = () => postJSON("/api/setup/settings", { pane: "automation" }).catch(() => {}); row.append(b);
     }
-    if (["claude_missing", "claude_auth", "claude_broken", "auth", "permission", "setup_required"].includes(code)) {
+    if (["claude_missing", "claude_auth", "claude_broken", "codex_missing", "codex_auth", "codex_broken", "auth", "permission", "setup_required"].includes(code)) {
       const b = el("button", "btn small", "Open Settings"); b.onclick = () => openSettings(); row.append(b);
     }
     if (row.children.length) n.append(row);

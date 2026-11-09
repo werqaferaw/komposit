@@ -1,0 +1,9 @@
+{"type":"thread.started","thread_id":"00000000-0000-7000-8000-000000000003"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"I’ll run the requested edit, then render the artboard."}}
+{"type":"item.started","item":{"id":"item_1","type":"mcp_tool_call","server":"komposit","tool":"edit","arguments":{"code":"'ok'","explanation":"Test edit"},"result":null,"error":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_1","type":"mcp_tool_call","server":"komposit","tool":"edit","arguments":{"code":"'ok'","explanation":"Test edit"},"result":{"content":[{"type":"text","text":"result: ok"}],"structured_content":null},"error":null,"status":"completed"}}
+{"type":"item.started","item":{"id":"item_2","type":"mcp_tool_call","server":"komposit","tool":"render","arguments":{},"result":null,"error":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_2","type":"mcp_tool_call","server":"komposit","tool":"render","arguments":{},"result":{"content":[{"type":"image","data":"iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAFklEQVR4nGMQUbQlCTGMahjVMHw1AAB0QnIBlP7A2QAAAABJRU5ErkJggg==","mimeType":"image/png"},{"type":"text","text":"Rendered artboard 1."}],"structured_content":null},"error":null,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_3","type":"agent_message","text":"The edit returned “ok,” and artboard 1 rendered successfully."}}
+{"type":"turn.completed","usage":{"input_tokens":24900,"cached_input_tokens":16128,"cache_write_input_tokens":0,"output_tokens":102,"reasoning_output_tokens":0}}

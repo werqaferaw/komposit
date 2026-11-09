@@ -12,6 +12,9 @@ const RUNNING = {
   preflight: "Checking print readiness",
   undo: "Undoing the last change",
   Read: "Looking at your reference",
+  // Codex's own tools are off for Komposit runs; if one runs anyway:
+  command: "Running a command",
+  web_search: "Searching the web",
 };
 
 function sentence(s) {
@@ -55,5 +58,7 @@ export function doneLabel(name, input = {}, { isError = false } = {}) {
   if (n === "preflight") return "Checked print readiness";
   if (n === "undo") return "Undid the last change";
   if (n === "Read") return "Looked at your reference";
+  if (n === "command") return "Ran a command";
+  if (n === "web_search") return "Searched the web";
   return stepLabel(n, input);
 }

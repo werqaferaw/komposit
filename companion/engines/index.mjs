@@ -1,6 +1,7 @@
 // Which engine runs a turn, from the AI the tester chose in settings:
 //
 //   claude-code  their Claude subscription, through Claude Code on this Mac
+//   codex        their ChatGPT plan, through Codex on this Mac
 //   anthropic    their Anthropic API key
 //   invite       the owner's key, through the invite gateway (the key never
 //                reaches this Mac; the invite code stands in for it)
@@ -9,6 +10,7 @@
 // The Fast / Balanced / Thorough picker maps to effort (and, for Claude Code,
 // the model: Sonnet is much faster per step; Opus for hard design reasoning).
 import { runCliTurn } from "./cli.mjs";
+import { runCodexTurn } from "./codex.mjs";
 import { runTurn } from "../harness/loop.mjs";
 import { getProvider } from "../providers/index.mjs";
 import { DEFAULT_MODEL } from "../providers/anthropic.mjs";
@@ -49,6 +51,25 @@ export async function runTurnFor(ai, { chat, app, text, images, files = [], effo
     });
     if (r?.sessionId) chat.cli[app] = r.sessionId;
     else if (r?.resumeFailed) delete chat.cli[app];
+    return;
+  }
+
+  // Codex: one thread per chat and app, like Claude Code's sessions. Its
+  // reasoning effort is the picker's low / medium / high.
+  if (ai.mode === "codex") {
+    chat.codex = chat.codex || {};
+    const r = await runCodexTurn({
+      app,
+      userText: text,
+      images,
+      fileDirs: files.length ? [...new Set(files.map((f) => dirname(f.path)))] : [],
+      emit,
+      signal,
+      effort: lvl.api,
+      resume: chat.codex[app] || null,
+    });
+    if (r?.sessionId) chat.codex[app] = r.sessionId;
+    else if (r?.resumeFailed) delete chat.codex[app];
     return;
   }
 

@@ -20,7 +20,7 @@ import platform from "./platform/index.mjs";
 export const DATA_DIR = process.env.KOMPOSIT_DATA_DIR || platform.defaultDataDir();
 export const CONFIG_FILE = join(DATA_DIR, "config.json");
 
-export const AI_MODES = ["claude-code", "anthropic", "openai", "invite"];
+export const AI_MODES = ["claude-code", "anthropic", "openai", "invite", "codex"];
 
 // Where invite codes are checked and the owner's key is applied. Overridable
 // for staging; the key itself never leaves that gateway.

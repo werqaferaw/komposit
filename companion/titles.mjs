@@ -5,12 +5,15 @@
 //
 // Each AI choice names chats on its own account:
 //   claude-code  Haiku through the person's Claude Code, no tools, no session
+//   codex        their Codex (ChatGPT plan), no tools, nothing kept, low effort
 //   anthropic    Haiku on their API key
 //   invite       Haiku through the gateway (one request off the daily quota)
 //   openai       the model they configured
 import { spawn } from "node:child_process";
+import { tmpdir } from "node:os";
 import Anthropic from "@anthropic-ai/sdk";
-import { findClaude, userEnv } from "./shellenv.mjs";
+import { findClaude, userEnv, findCodex, codexEnv, codexAuthStore } from "./shellenv.mjs";
+import { codexPlainArgs, lastMessage } from "./engines/codex.mjs";
 import { DEFAULT_GATEWAY } from "./config.mjs";
 
 const APP_NAMES = { illustrator: "Illustrator", photoshop: "Photoshop", aftereffects: "After Effects" };
@@ -85,6 +88,30 @@ async function viaClaudeCode(prompt, signal) {
   });
 }
 
+async function viaCodex(prompt, signal) {
+  const codex = await findCodex();
+  if (!codex) return "";
+  const env = codexEnv(await userEnv()); // subscription billing only, as for turns
+  const args = codexPlainArgs({ instructions: SYSTEM, authStore: codexAuthStore() });
+  return new Promise((resolve) => {
+    let out = "";
+    let child;
+    try {
+      child = spawn(codex, args, { cwd: tmpdir(), stdio: ["pipe", "pipe", "ignore"], env, windowsHide: true });
+    } catch {
+      return resolve("");
+    }
+    const kill = () => { try { child.kill(); } catch {} };
+    signal?.addEventListener("abort", kill, { once: true });
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (d) => { out += d; });
+    child.on("error", () => resolve(""));
+    child.on("close", (code) => resolve(code === 0 ? lastMessage(out) : ""));
+    child.stdin.on("error", () => {});
+    child.stdin.end(prompt);
+  });
+}
+
 async function viaAnthropic(prompt, creds, signal) {
   if (!creds.apiKey) return "";
   const client = new Anthropic({ apiKey: creds.apiKey, ...(creds.baseUrl ? { baseURL: creds.baseUrl } : {}), maxRetries: 1, timeout: TIMEOUT_MS });
@@ -124,6 +151,7 @@ export async function nameChat(ai, { text, app, files = [] } = {}) {
   try {
     let raw = "";
     if (ai?.mode === "claude-code") raw = await viaClaudeCode(prompt, ctl.signal);
+    else if (ai?.mode === "codex") raw = await viaCodex(prompt, ctl.signal);
     else if (ai?.mode === "anthropic") raw = await viaAnthropic(prompt, { apiKey: ai.anthropic?.apiKey, baseUrl: ai.anthropic?.baseUrl }, ctl.signal);
     else if (ai?.mode === "invite") raw = await viaAnthropic(prompt, { apiKey: ai.invite?.code, baseUrl: ai.invite?.gateway || DEFAULT_GATEWAY }, ctl.signal);
     else if (ai?.mode === "openai") raw = await viaOpenAI(prompt, ai.openai || {}, ctl.signal);

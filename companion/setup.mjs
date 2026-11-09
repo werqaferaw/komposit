@@ -15,7 +15,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { appManifest, getBridge } from "./bridges/index.mjs";
 import { runningApps } from "./desktop.mjs";
 import { config, updateConfig, publicAI, DEFAULT_GATEWAY, AI_MODES } from "./config.mjs";
-import { claudeStatus } from "./shellenv.mjs";
+import { claudeStatus, codexStatus } from "./shellenv.mjs";
 import platform from "./platform/index.mjs";
 
 // ---------- Adobe apps + Automation permission ----------
@@ -215,6 +215,18 @@ export async function saveAI(body = {}) {
     return { ok: true, ai: publicAI() };
   }
 
+  if (mode === "codex") {
+    const st = await codexStatus({ fresh: true });
+    if (!st.installed) return { ok: false, error: "Codex isn't installed yet.", codex: st };
+    if (st.broken) return { ok: false, error: "Codex's install looks broken. Reinstall it, then check again.", codex: st };
+    if (!st.loggedIn) return { ok: false, error: "Codex is installed but not signed in.", codex: st };
+    if (!st.usesSubscription) return { ok: false, error: "Codex is signed in with an API key. Sign in with ChatGPT instead.", codex: st };
+    updateConfig((x) => {
+      x.ai.mode = "codex";
+    });
+    return { ok: true, ai: publicAI() };
+  }
+
   if (mode === "anthropic") {
     const apiKey = String(body.apiKey || c.ai.anthropic?.apiKey || "").trim();
     if (!apiKey) return { ok: false, error: "Paste your Anthropic API key." };
@@ -276,11 +288,13 @@ export function markOnboarded(done = true) {
 
 // Everything the setup screens need, in one call.
 export async function setupStatus({ fresh = false } = {}) {
+  const codex = codexStatus({ fresh }); // alongside the checks below
   const [apps, files, claude] = await Promise.all([appsStatus(), filesStatus(), claudeStatus({ fresh })]);
   return {
     apps,
     files,
     claude,
+    codex: await codex,
     ai: publicAI(),
     onboarded: !!config().onboarded,
     helper: !!(await helperPath()),
