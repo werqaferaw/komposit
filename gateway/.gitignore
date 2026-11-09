@@ -1,0 +1,8 @@
+node_modules/
+# wrangler dev state (local KV) and test state
+.wrangler/
+# local secrets for `wrangler dev`
+.dev.vars
+.dev.vars.*
+.env
+.env.*

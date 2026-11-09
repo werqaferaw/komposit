@@ -1,0 +1,33 @@
+{
+  "name": "komposit",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A design-specific agent harness: Claude reaches into your live Adobe apps, writes and runs its own ExtendScript, previews the result, and self-checks.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/werqaferaw/komposit.git"
+  },
+  "homepage": "https://komposit.werq.dev",
+  "bugs": {
+    "url": "https://github.com/werqaferaw/komposit/issues"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "serve": "node companion/server.mjs",
+    "mcp": "node companion/mcp/doc-server.mjs",
+    "test": "node --test --test-reporter=spec companion/test/api-engine.test.mjs companion/test/tools.test.mjs companion/test/incidents.test.mjs companion/test/win.test.mjs companion/test/titles.test.mjs && node companion/test/openai-provider.test.mjs",
+    "test:live": "node scripts/test-live.mjs",
+    "check": "node scripts/check.mjs",
+    "build:mac": "packaging/build-mac.sh",
+    "build:web": "node web/build.mjs",
+    "incidents": "node companion/incidents.mjs",
+    "build:win": "node packaging/windows/build.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "1.3.0"
+  }
+}

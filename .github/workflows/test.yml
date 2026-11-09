@@ -1,0 +1,39 @@
+# Unit tests and syntax checks on every push and pull request, on macOS and
+# Linux. No Adobe apps and no network needed. (Windows is covered by
+# windows.yml, which also builds the installer.)
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run check
+      - name: gateway tests
+        working-directory: gateway
+        run: |
+          npm ci
+          npm test

@@ -1,0 +1,55 @@
+# komposit-gateway: invite-gated proxy in front of the Anthropic Messages API.
+# Setup, invites and deploy steps are in README.md.
+#
+# Nothing in this file is secret. The Anthropic key is a Worker secret, never a var:
+#   npx wrangler secret put ANTHROPIC_API_KEY
+
+name = "komposit-gateway"
+main = "src/index.js"
+# The newest date the pinned wrangler's local runtime (workerd 1.20261019.1) supports,
+# so `wrangler dev` and production run the same runtime semantics.
+compatibility_date = "2026-10-19"
+
+# Keep komposit-gateway.<your-subdomain>.workers.dev on for smoke tests; set to
+# false once the custom domain below is live if you want a single entry point.
+workers_dev = true
+
+# Custom domain. The werq.dev zone is on Cloudflare, so on deploy Wrangler creates
+# the DNS record and a certificate for this exact hostname (that also covers this
+# two-level subdomain, which Universal SSL does not). The hostname must not
+# already have a CNAME record. Deploy while
+# signed in to the Cloudflare account that owns werq.dev (npx wrangler whoami).
+[[routes]]
+pattern = "gateway.komposit.werq.dev"
+custom_domain = true
+
+# Invite records: inv:<sha256 hex of the invite code> -> JSON
+#   {"name": "...", "disabled"?: true, "dailyRequests"?: n, "monthlyOutputTokens"?: n, "models"?: [...]}
+[[kv_namespaces]]
+binding = "INVITES"
+# TODO before deploying: run `npx wrangler kv namespace create INVITES` and paste the id it prints.
+id = "TODO-replace-with-INVITES-namespace-id"
+
+# Usage counters: req:<hash>:<YYYY-MM-DD> (requests that UTC day),
+# tok:<hash>:<YYYY-MM> (token totals that UTC month).
+[[kv_namespaces]]
+binding = "USAGE"
+# TODO before deploying: run `npx wrangler kv namespace create USAGE` and paste the id it prints.
+id = "TODO-replace-with-USAGE-namespace-id"
+
+[vars]
+# Where requests are forwarded. Only the tests point this somewhere else.
+UPSTREAM_BASE = "https://api.anthropic.com"
+# Models an invite may call unless its record has its own "models" list.
+ALLOWED_MODELS = "claude-opus-5-5,claude-sonnet-5-5,claude-haiku-5-5"
+# Requests asking for more output than this are clamped down to it.
+MAX_TOKENS_CAP = "64000"
+# Per-invite defaults; an invite record can override either one.
+DEFAULT_DAILY_REQUESTS = "300"
+DEFAULT_MONTHLY_OUTPUT_TOKENS = "2000000"
+
+# Workers Logs: keeps the gateway's one-line JSON logs (invite name, model, status,
+# token counts; never bodies or keys) for a few days in the dashboard. Cloudflare
+# redacts headers such as x-api-key and authorization in invocation logs.
+[observability]
+enabled = true

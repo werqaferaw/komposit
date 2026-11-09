@@ -1,0 +1,25 @@
+{
+  "name": "komposit-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Invite-gated Cloudflare Worker that proxies the Anthropic Messages API with the owner's key.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/werqaferaw/komposit.git",
+    "directory": "gateway"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "wrangler dev --local",
+    "test": "node --test --test-reporter=spec test/gateway.test.mjs",
+    "mint": "node scripts/mint-invite.mjs"
+  },
+  "devDependencies": {
+    "@anthropic-ai/sdk": "1.3.0",
+    "wrangler": "4.151.3"
+  }
+}

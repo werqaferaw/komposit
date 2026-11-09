@@ -1,0 +1,15 @@
+{
+  "name": "komposit-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The Komposit UI on the web (Cloudflare Worker + static assets).",
+  "scripts": {
+    "build": "node build.mjs",
+    "deploy": "node build.mjs && wrangler deploy",
+    "dry-run": "node build.mjs && wrangler deploy --dry-run --outdir .wrangler/dry"
+  },
+  "devDependencies": {
+    "wrangler": "4.151.3"
+  }
+}

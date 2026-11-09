@@ -1,0 +1,23 @@
+# komposit-app: serves the Komposit UI on the web. The page then talks to the
+# Komposit app on the visitor's own Mac (http://127.0.0.1:4321-4330); nothing
+# about their files or AI keys passes through this Worker.
+#
+# Deploy: npm run deploy   (after `npx wrangler login`)
+
+name = "komposit-app"
+main = "worker.js"
+compatibility_date = "2026-10-19"
+workers_dev = true
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+# Run the Worker for every request so it can add the security headers.
+run_worker_first = true
+
+# Custom domain. The werq.dev zone is on Cloudflare: on deploy Wrangler creates
+# the DNS record and certificate for this exact hostname. Deploy while signed in
+# to the Cloudflare account that owns werq.dev (npx wrangler whoami).
+[[routes]]
+pattern = "app.komposit.werq.dev"
+custom_domain = true

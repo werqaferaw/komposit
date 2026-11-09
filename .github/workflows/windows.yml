@@ -1,0 +1,94 @@
+# Komposit for Windows: unit tests, the native helper and tray app, the
+# installer, and smoke tests of all of it on a PC without Adobe apps.
+# The installer is uploaded as the artifact "komposit-windows-installer";
+# packaging/publish-release.sh takes it from the newest green run on main.
+name: windows
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "companion/**"
+      - "ui/**"
+      - "packaging/windows/**"
+      - "scripts/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/windows.yml"
+  pull_request:
+    paths:
+      - "companion/platform/**"
+      - "packaging/windows/**"
+      - ".github/workflows/windows.yml"
+  workflow_dispatch:
+    inputs:
+      web_url:
+        description: "Hosted UI the tray app opens (leave blank for the app's own page)"
+        required: false
+        default: ""
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Syntax check
+        run: npm run check
+
+      - name: Build the helper and the tray app (csc.exe)
+        run: node packaging/windows/build.mjs compile
+
+      - name: Stage
+        env:
+          KOMPOSIT_WEB_URL: ${{ inputs.web_url }}
+        run: node packaging/windows/build.mjs stage
+
+      - name: Installer (Inno Setup)
+        run: node packaging/windows/build.mjs installer
+
+      - name: Smoke tests (no Adobe apps on this PC)
+        run: node packaging/windows/smoke.mjs --installer auto
+
+      - name: Transport tests against stand-in Adobe apps
+        run: node packaging/windows/fake-adobe.mjs
+
+      - name: Upload the installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: komposit-windows-installer
+          path: dist/Komposit-Setup-*.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: komposit-windows-logs
+          path: |
+            dist/windows/smoke.json
+            dist/windows/logs/
+            dist/windows/fake-adobe.json
+            dist/windows/fake-logs/
+          if-no-files-found: ignore
+          retention-days: 14

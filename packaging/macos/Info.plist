@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key><string>dev.werq.komposit</string>
+  <key>CFBundleName</key><string>Komposit</string>
+  <key>CFBundleDisplayName</key><string>Komposit</string>
+  <key>CFBundleExecutable</key><string>Komposit</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>__VERSION__</string>
+  <key>CFBundleVersion</key><string>__BUILD__</string>
+  <key>LSMinimumSystemVersion</key><string>13.5</string>
+  <key>LSUIElement</key><true/>
+  <key>LSApplicationCategoryType</key><string>public.app-category.graphics-design</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSHumanReadableCopyright</key><string>Komposit preview</string>
+  <key>NSAppleEventsUsageDescription</key><string>Komposit controls Illustrator, Photoshop and After Effects to make the edits you ask for, in your open documents.</string>
+  <key>NSDesktopFolderUsageDescription</key><string>Komposit lists the design files on your Desktop and opens the ones you pick.</string>
+  <key>NSDocumentsFolderUsageDescription</key><string>Komposit lists the design files in Documents and opens the ones you pick.</string>
+  <key>NSDownloadsFolderUsageDescription</key><string>Komposit lists the design files in Downloads and opens the ones you pick.</string>
+  <key>KompositWebURL</key><string>__WEBURL__</string>
+</dict>
+</plist>
