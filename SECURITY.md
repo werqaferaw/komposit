@@ -41,9 +41,18 @@ only when all four of these hold (see `companion/auth.mjs`):
 
 API keys you enter stay on your computer, in Komposit's settings file
 (mode 0600 on macOS). The invite gateway (`gateway/`) holds the owner's
-Anthropic key server-side; invite codes are stored only as SHA-256 hashes.
+Anthropic key server-side; invite codes and sign-in sessions are stored only as
+SHA-256 hashes.
+
+Signing in with Google is optional. It uses the OAuth authorization code flow
+with PKCE, a single-use state tied to the browser that started it, and a nonce.
+It stores only Google's id for the account, a verified email, the name and the
+allowance, and you can delete the account yourself
+([docs/privacy.md](docs/privacy.md)). The gateway answers browser calls (CORS)
+only from the hosted UI and the app's local page; server-to-server calls carry
+no Origin and are unaffected.
 
 ## In scope
 
 The local server and its locks, the MCP tool server, the hosted UI (`web/`),
-the invite gateway (`gateway/`), and the Mac and Windows apps.
+the gateway (`gateway/`) and its sign-in, and the Mac and Windows apps.

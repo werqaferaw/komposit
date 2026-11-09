@@ -30,7 +30,8 @@ custom_domain = true
 #   {"name": "...", "disabled"?: true, "dailyRequests"?: n, "monthlyOutputTokens"?: n, "models"?: [...]}
 [[kv_namespaces]]
 binding = "INVITES"
-# TODO before deploying: run `npx wrangler kv namespace create INVITES` and paste the id it prints.
+# TODO before deploying: setup.sh writes the id here (or run
+# `npx wrangler kv namespace create komposit-gateway-INVITES` and paste the id it prints).
 id = "TODO-replace-with-INVITES-namespace-id"
 
 # Usage counters: req:<hash>:<YYYY-MM-DD> (requests that UTC day),
@@ -38,7 +39,8 @@ id = "TODO-replace-with-INVITES-namespace-id"
 # req:user:<id>:<YYYY-MM-DD> and tok:user:<id>:<YYYY-MM>.
 [[kv_namespaces]]
 binding = "USAGE"
-# TODO before deploying: run `npx wrangler kv namespace create USAGE` and paste the id it prints.
+# TODO before deploying: setup.sh writes the id here (or run
+# `npx wrangler kv namespace create komposit-gateway-USAGE` and paste the id it prints).
 id = "TODO-replace-with-USAGE-namespace-id"
 
 # Accounts for the optional Google sign-in: users, sessions, one-time OAuth

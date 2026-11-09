@@ -326,13 +326,30 @@ the first real-PC test: [windows-testing.md](windows-testing.md).
   the token slot for the download link). Its CSP allows connections only to the
   site itself and `127.0.0.1` / `localhost`. Deploy: `cd web && npm run deploy`.
 - **`gateway/`** is an Anthropic-compatible `/v1/messages` proxy.
-  - **Auth:** the invite code is the API key (`x-api-key` or bearer). Codes are stored as SHA-256 hashes in KV.
-  - **Limits:** a per-invite daily request limit and a monthly output-token limit.
+  - **Auth:** the API key (`x-api-key` or bearer) is an invite code (`kp_…`) or
+    the session of a signed-in account (`ks_…`). Both are stored only as SHA-256
+    hashes: invites in KV, sessions in D1.
+  - **Sign-in (optional; nothing needs it):** Google OAuth, authorization code
+    + PKCE + state + nonce, at `/auth/google/start?return=<origin>` and
+    `/auth/google/callback`. The session goes back to the page in a URL fragment
+    (`#ks=`). Accounts and sessions are in D1 (`migrations/`). `POST /auth/logout`
+    ends a session; `DELETE /v1/me` deletes the account, its sessions and its
+    usage. What is stored: [privacy.md](privacy.md).
+  - **Limits:** per invite, a daily request limit and a monthly output-token
+    limit. Per account, the same daily limit and its own monthly allowance (0
+    until the owner grants one, which gets a 403).
+  - **Browsers:** CORS on `/v1/messages`, `/v1/me` and `/auth/logout`, only for
+    `https://app.komposit.werq.dev` (`RETURN_ORIGINS`) and the local page on
+    ports 4321–4330. Calls with no Origin (the local server) are unaffected.
   - **Allowed models:** opus/sonnet/haiku 5.5, with `max_tokens` clamped.
   - **The owner key:** stored as a Worker secret, never in the DMG or the browser.
   - **Usage:** metered from the stream; a hang-up cancels the upstream request.
-  - **Invites:** `scripts/mint-invite.mjs` makes them.
-  - **Tests:** `cd gateway && npm test`. See `gateway/README.md`.
+  - **Invites and allowances:** `scripts/mint-invite.mjs` makes invites;
+    `scripts/grant.mjs` grants, revokes and lists account allowances by email.
+  - **Setup:** `gateway/setup.sh` (KV, D1 and migrations, secrets, deploy;
+    `--yes` runs it without a terminal).
+  - **Tests:** `cd gateway && npm test`, against a mock Anthropic and a mock
+    Google. See `gateway/README.md`.
 
 ---
 
@@ -342,7 +359,7 @@ the first real-PC test: [windows-testing.md](windows-testing.md).
 |---|---|
 | `npm test` | API engine: request shape (Opus 5.5, betas, fallbacks, effort, caching, eager tools), parsing, append-only history across turns and app switches, refusals, invalid tool input; tools, selection, attachments; incident log; the Windows platform layer (`win.test.mjs`); chat titles; OpenAI-compatible provider |
 | `npm run test:live [-- app]` | the above plus live checks: Illustrator export/save/preflight/selection, Photoshop inspect, After Effects selection/frames/preview/MP4 |
-| `cd gateway && npm test` | the invite gateway against a mock Anthropic |
+| `cd gateway && npm test` | the gateway against a mock Anthropic and a mock Google: invites, sign-in, accounts, CORS |
 | `npm run check` | syntax of every module, the UI and the build scripts |
 | `packaging/verify-dmg.sh` | a built DMG matches the checkout, universal, signed, the right hosted URL |
 | `node packaging/windows/smoke.mjs` (CI) | the Windows build on a PC without Adobe: helper, platform layer, server and its locks, tray self-test, install/uninstall |
@@ -395,10 +412,10 @@ scripts/            check.mjs · test-live.mjs (cross-platform npm scripts)
 .github/workflows/  test.yml (unit tests on every push and pull request)
                     · windows.yml (tests, build, smoke tests, installer artifact)
 web/                Cloudflare Worker for the hosted UI
-gateway/            Cloudflare Worker: invite gateway
+gateway/            Cloudflare Worker: invite gateway, optional Google sign-in (D1)
 brand/              logo files from the spec (04.C solid tile, wordmark, lockup) · README
 docs/               architecture.md (this) · getting-started.md · windows.md · windows-testing.md
-                    · releasing.md · release-notes.md
+                    · releasing.md · release-notes.md · privacy.md (what sign-in stores)
 ```
 
 ---
