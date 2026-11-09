@@ -14,19 +14,19 @@ Windows specifics are in [windows.md](windows.md).
 
 ```
                           the web (optional)                         this Mac
-                 ┌──────────────────────────────┐   ┌─────────────────────────────────────────┐
- browser ───────▶│ app.komposit.werq.dev        │   │ Komposit.app (menu bar)                  │
-   │             │   static UI (web/ Worker)    │   │   └─ node  companion/server.mjs  :4321    │
-   │             └──────────────────────────────┘   │        ├─ UI served locally too  (ui/)   │
-   │  fetch http://127.0.0.1:4321 (token)           │        ├─ engines: Claude Code | API     │
-   └───────────────────────────────────────────────▶│        ├─ tools → bridges → platform/    │
-                                                    │        └─ chats + settings on disk       │
-                                                    └──────────────┬──────────────────────────┘
+                 ┌──────────────────────────────┐   ┌─────────────────────────────────────────────┐
+ browser ───────▶│ app.komposit.werq.dev        │   │ Komposit.app (menu bar)                      │
+   │             │   static UI (web/ Worker)    │   │   └─ node  companion/server.mjs  :4321        │
+   │             └──────────────────────────────┘   │        ├─ UI served locally too  (ui/)       │
+   │  fetch http://127.0.0.1:4321 (token)           │        ├─ engines: Claude Code | Codex | API │
+   └───────────────────────────────────────────────▶│        ├─ tools → bridges → platform/        │
+                                                    │        └─ chats + settings on disk           │
+                                                    └──────────────┬──────────────────────────────┘
                                                                    │ AppleScript (Mac) · COM / AfterFX.exe (Windows)
                                                          Illustrator · Photoshop · After Effects
 
- AI, chosen per Mac:  Claude Code (subscription) · Anthropic key · OpenAI-compatible key ·
-                      invite code ──▶ gateway.komposit.werq.dev (gateway/ Worker, owner's key)
+ AI, chosen per Mac:  Claude Code (Claude plan) · Codex (ChatGPT plan) · Anthropic key ·
+                      OpenAI-compatible key · invite code ──▶ gateway.komposit.werq.dev (gateway/ Worker, owner's key)
 ```
 
 - **The local half** (the Mac DMG, or the Windows installer) drives the Adobe
@@ -85,7 +85,7 @@ missing token 401, form POST 415, path traversal 404.
 
 `~/Library/Application Support/Komposit/config.json` (mode 0600; Windows:
 `%APPDATA%\Komposit\config.json`): the token,
-the chosen AI (`claude-code | anthropic | openai | invite` with key/code), and
+the chosen AI (`claude-code | codex | anthropic | openai | invite` with key/code), and
 onboarding state. Keys go only to the service the tester picked; the UI sees
 hints (`sk-ant-…3f9a`). In a repo checkout, `.env` is the fallback when no AI is
 chosen (`MODEL_PROVIDER=cli` means Claude Code).
@@ -102,6 +102,10 @@ chosen (`MODEL_PROVIDER=cli` means Claude Code).
   prompt; Windows doesn't ask (and its folders can be redirected by OneDrive).
 - **Claude Code**: found through the login-shell PATH and the usual install
   folders (`shellenv.mjs`); `claude auth status` tells signed-in and plan.
+- **Codex**: found the same way (`CODEX_PATH` overrides; on Windows, where npm
+  installs only `codex.cmd`, the native `codex.exe` inside npm's package);
+  `codex login status` tells whether it's signed in with ChatGPT or an API key.
+  Only a ChatGPT sign-in can be chosen.
 - **AI choice**: validated before it's saved. Anthropic key via the SDK's
   models list; OpenRouter via `/api/v1/key`; other services via `/models`;
   invite codes via the gateway's `/v1/me`.
@@ -121,6 +125,7 @@ after a reload is polled until it ends.
 ```
 UI ── POST /api/turn {chatId?, app, effort, text, images} ─▶ server
                                                          ├─ claude-code → engines/cli.mjs
+                                                         ├─ codex → engines/codex.mjs
                                                          └─ anthropic | invite | openai → harness/loop.mjs
 UI ◀─ SSE: start · note · text · step · step_done · final · error · done ──┘
 ```
@@ -133,6 +138,7 @@ a timer, collapsed when done), **result** (the latest render) and **message**
 
 Effort picker: `low | medium | high` = Fast / Balanced / Thorough.
 - Claude Code: Sonnet at low/medium effort; Opus at high.
+- Codex: Codex's own model for the ChatGPT plan, `model_reasoning_effort` low, medium or high.
 - API: Claude Opus 5.5 with `output_config.effort` low, medium or high.
 
 While a turn works in an app, preview rendering of that app's documents is
@@ -148,6 +154,40 @@ works inside the app bundle.
 - **Billing:** API-key variables are stripped from the child, so it never bills a metered key.
 - **Memory:** sessions live in `<data>/claude-code` and resume per chat and app (`--resume`).
 - **Stop:** kills the whole process group.
+
+### Codex engine: `engines/codex.mjs`
+
+It runs the tester's own `codex exec --json` (their ChatGPT plan) with the same
+prompt as Claude Code (`steerFor`, sent as `developer_instructions`) and the
+prompt on stdin. Checked against codex-cli 0.167.0.
+
+- **Tools:** Komposit's doc server for this run only (`-c mcp_servers.komposit.*`:
+  `process.execPath` + `doc-server.mjs --app <app>`, required, 900 s per call,
+  approval mode `approve`, listed up front). `--ignore-user-config` leaves out
+  the person's `~/.codex/config.toml` (their MCP servers, model, profiles);
+  the sign-in still comes from `~/.codex`, in the keyring if their config says so.
+  Codex's own shell, web search, apps, plugins, sub-agents, image generation and
+  browser tools are off (`-c features.<key>=false`: an unknown `--disable` key
+  would fail the run). Still there, with no switch: `apply_patch` (nothing to
+  write to in the read-only sandbox) and the MCP resource tools. No folder
+  `AGENTS.md`; Codex's global `~/.codex/AGENTS.md` still loads (no switch).
+- **No prompts, no writes:** approval `never`, `--sandbox read-only` (it can
+  still read attached files), working folder `<data>/codex`.
+- **Billing:** `OPENAI_API_KEY`, `CODEX_API_KEY`, `CODEX_ACCESS_TOKEN` and
+  `OPENAI_BASE_URL` are stripped; a turn doesn't start if Codex is signed out or
+  signed in with an API key (otherwise a signed-out run retries for about 20 s).
+- **Memory:** one Codex thread per chat and app (`exec resume <id>`). A lost
+  thread (`no rollout found`) returns `resumeFailed`, so the next message starts fresh.
+- **Stop:** kills the process group. Codex starts the doc server in a group of
+  its own; it quits as soon as Codex's end of its stdin closes.
+- **Events:** reasoning summary titles and agent messages → `note`; the last
+  agent message → `final`; `mcp_tool_call` started/completed → `tool_run` /
+  `tool_done` (with the render image and preview video); `turn.failed` → `error`
+  (`codex_auth` for sign-in problems, a plain message for the plan's usage
+  limit). Codex reports reconnects as `error` events while it retries: quiet,
+  except one "retrying" note. Default models use "code mode": the model calls
+  Komposit's tools from a JavaScript `exec` cell, and each call still arrives as
+  an `mcp_tool_call` item.
 
 ### API engine: `harness/loop.mjs` + `providers/`
 
@@ -340,7 +380,7 @@ the first real-PC test: [windows-testing.md](windows-testing.md).
 
 | Command | Covers |
 |---|---|
-| `npm test` | API engine: request shape (Opus 5.5, betas, fallbacks, effort, caching, eager tools), parsing, append-only history across turns and app switches, refusals, invalid tool input; tools, selection, attachments; incident log; the Windows platform layer (`win.test.mjs`); chat titles; OpenAI-compatible provider |
+| `npm test` | API engine: request shape (Opus 5.5, betas, fallbacks, effort, caching, eager tools), parsing, append-only history across turns and app switches, refusals, invalid tool input; tools, selection, attachments; incident log; the Windows platform layer (`win.test.mjs`); chat titles; OpenAI-compatible provider; the Codex engine (`codex.test.mjs`: recorded `codex exec --json` streams, the command line, status, broken installs, Stop, titles, through a fake `codex`) |
 | `npm run test:live [-- app]` | the above plus live checks: Illustrator export/save/preflight/selection, Photoshop inspect, After Effects selection/frames/preview/MP4 |
 | `cd gateway && npm test` | the invite gateway against a mock Anthropic |
 | `npm run check` | syntax of every module, the UI and the build scripts |
@@ -351,6 +391,7 @@ the first real-PC test: [windows-testing.md](windows-testing.md).
 End-to-end checks done by hand before a release:
 - **Security locks:** checked with curl.
 - **Claude Code engine:** real turns in Photoshop (10 s; a follow-up resumed in 4 s).
+- **Codex engine:** real runs on a ChatGPT sign-in with a stand-in MCP server (a plain answer, edit + render with the image seen by the model, a resume, a failed turn, a chat title; 6-9 s each). Not yet run against a live Adobe app.
 - **API engine:** run through the server against a streaming mock and the real Photoshop bridge.
 - **Hosted flow (Chrome):** pairing, onboarding, workspace, under the production CSP.
 - **Local UI:** checked in WebKit.
@@ -369,7 +410,7 @@ companion/
   auth.mjs          host / origin / token / JSON locks, CORS + PNA
   config.mjs        settings + token on disk; effective AI; public hints
   setup.mjs         onboarding checks and actions
-  shellenv.mjs      login-shell PATH, find `claude`, `claude auth status`
+  shellenv.mjs      login-shell PATH, find `claude`, `claude auth status`, find `codex`, `codex login status`
   chats.mjs         chat store (chat.json, api.json, img/)
   titles.mjs        AI-written chat titles
   labels.mjs        plain-language step labels
@@ -378,15 +419,15 @@ companion/
   desktop.mjs       running apps, recent files, folder tree, thumbnails (async)
   preview.mjs       render open docs for cards; busy guard
   env.mjs           .env loader (checkouts only)
-  engines/          index.mjs (router, effort map) · cli.mjs (Claude Code)
+  engines/          index.mjs (router, effort map) · cli.mjs (Claude Code) · codex.mjs (Codex)
   harness/          loop.mjs · tools.mjs · system.mjs · behavior.mjs · guidance.mjs · context.mjs (live selection)
                     · attachments.mjs
   providers/        anthropic.mjs (SDK) · openai.mjs · index.mjs
   mcp/doc-server.mjs  Komposit tools over MCP (stdio)
   bridges/          extendscript.mjs (envelope, transport via platform/) · illustrator · photoshop · aftereffects
                     · files.mjs (export paths)
-  test/             api-engine · tools · incidents · win · titles · openai-provider (unit)
-                    · illustrator.live · aftereffects.live
+  test/             api-engine · tools · incidents · win · titles · openai-provider · claude-broken
+                    · codex (+ fixtures/codex: recorded streams) (unit) · illustrator.live · aftereffects.live
 ui/                 index.html · app.css · app.js · favicon.svg
 packaging/          build-mac.sh · release-mac.sh · verify-dmg.sh · publish-release.sh
                     macos/{Komposit.swift, helper.swift, make-icon.swift, Info.plist}
@@ -407,7 +448,8 @@ docs/               architecture.md (this) · getting-started.md · windows.md �
 
 **Works today:** the Mac app; the local server and UI; the Claude Code,
 Anthropic, OpenAI-compatible and invite engines; onboarding; chat history; the
-hosted UI and the invite gateway. **Windows** is an early build: tested
+hosted UI and the invite gateway. The **Codex** engine is new: checked on a
+real ChatGPT sign-in, not yet with a live Adobe app. **Windows** is an early build: tested
 automatically on a PC without Adobe apps, not yet on a real PC with Adobe apps
 ([windows-testing.md](windows-testing.md)).
 
