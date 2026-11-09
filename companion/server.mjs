@@ -3,15 +3,17 @@
 // it serves itself (http://127.0.0.1:<port>/) or the hosted UI on the web.
 //
 // Every /api call passes the locks in auth.mjs (host, origin, token, JSON).
-// Agent turns stream back as server-sent events; each turn is also saved to
-// the chat store so the conversation renders the same after a reload.
+// Agent turns run here and stream back as server-sent events, or (API keys
+// kept in the hosted page) run in the web page, which calls the model itself
+// and this server only for tools (POST /api/tool) and to record the turn
+// (POST /api/turn/start, /api/turn/record). Either way each turn is saved to
+// the chat store, so the conversation renders the same after a reload.
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { createReadStream, readFileSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, extname, basename } from "node:path";
 import { randomBytes } from "node:crypto";
-import { env } from "./env.mjs";
 import { config, token, effectiveAI, publicAI, DATA_DIR } from "./config.mjs";
 import { guard, hostedUrl, SHELL_HEADERS, webOrigins } from "./auth.mjs";
 import { appManifest, getBridge, APPS } from "./bridges/index.mjs";
@@ -19,7 +21,9 @@ import { workspaceSnapshot, thumbnail, openFile, browse, saveRender, cachedRende
 import { markRecent, renderOpenFile, markBusy } from "./preview.mjs";
 import * as chats from "./chats.mjs";
 import * as setup from "./setup.mjs";
-import { runTurnFor, EFFORTS } from "./engines/index.mjs";
+import { runTurnFor, withContext, EFFORTS } from "./engines/index.mjs";
+import { executeTool, validateToolInput } from "./harness/tools.mjs";
+import { env } from "./env.mjs";
 import { nameChat } from "./titles.mjs";
 import { watchForDialog } from "./dialogwatch.mjs";
 import { scratchDir } from "./scratch.mjs";
@@ -110,28 +114,28 @@ function cleanFiles(list) {
     .map((f) => ({ name: String(f.name || "file").slice(0, 200), media_type: String(f.media_type || ""), data: f.data }));
 }
 
-async function handleTurn(req, res, body) {
-  const ai = effectiveAI();
-  if (!ai.mode) return json(res, 409, { error: "setup_required", message: "Choose an AI in Settings first." });
-
+// Start a turn: the chat (new, or the one named), the person's message and
+// attachments saved with it, and the turn record. Shared by turns run here and
+// turns the web page runs. Returns { status, error } when it can't start.
+function beginTurn(body, engine) {
   const app = APPS.includes(body.app) ? body.app : "illustrator";
   const text = String(body.text || "").trim();
   const images = cleanImages(body.images);
   const incoming = cleanFiles(body.files);
   const effort = EFFORTS[body.effort] ? body.effort : "medium";
-  if (!text && !images.length && !incoming.length) return json(res, 400, { error: "empty message" });
+  if (!text && !images.length && !incoming.length) return { status: 400, error: { error: "empty message" } };
 
   let chat = body.chatId ? chats.loadChat(body.chatId) : null;
   const isNew = !chat;
   if (!chat) chat = chats.createChat({ app, title: chats.titleFrom(text || incoming[0]?.name || "") });
-  if (runningTurns.has(chat.id)) return json(res, 409, { error: "busy", message: "This chat is still working." });
+  if (runningTurns.has(chat.id)) return { status: 409, error: { error: "busy", message: "This chat is still working." } };
 
   const turn = {
     id: "t_" + randomBytes(5).toString("hex"),
     at: Date.now(),
     app,
     effort,
-    engine: ai.mode,
+    engine,
     user: { text, images: images.map((img) => chats.saveImage(chat.id, img, "ref")).filter(Boolean) },
     steps: [],
     final: "",
@@ -142,31 +146,17 @@ async function handleTurn(req, res, body) {
   chat.app = app;
   chat.turns.push(turn);
   chats.saveChat(chat);
+  return { chat, turn, isNew, app, text, images, files, incoming, effort };
+}
 
-  res.writeHead(200, {
-    "content-type": "text/event-stream",
-    "cache-control": "no-store",
-    connection: "keep-alive",
-    "x-accel-buffering": "no",
-  });
-  req.socket.setTimeout(0);
-  const send = (ev) => {
-    if (!res.writableEnded) res.write(`data: ${JSON.stringify(ev)}\n\n`);
-  };
-  // Long thinking gaps: a comment line every 15 s keeps proxies and fetch alive.
-  const heartbeat = setInterval(() => {
-    if (!res.writableEnded) res.write(`: keepalive\n\n`);
-  }, 15000);
-
-  const controller = new AbortController();
-  runningTurns.set(chat.id, { controller, turnId: turn.id, chat });
-  res.on("close", () => {
-    if (!res.writableFinished) controller.abort();
-  });
-
-  const started = Date.now();
+// Records one turn's engine events on the chat (plain-language steps, renders
+// saved as files, notes, the final message, errors) and hands each one,
+// normalized, to `send`: the SSE stream for a turn run here, nothing for a turn
+// the web page runs (the page draws its own). `finish` settles the turn.
+function turnRecorder({ chat, turn, app, send, watchDialogs = true }) {
   const stepStart = new Map(); // tool id -> t0
   const stepInput = new Map();
+  const watchers = new Map(); // step id -> stop() for its dialog watcher
   let lastSave = 0;
   const persist = (force = false) => {
     if (force || Date.now() - lastSave > 1500) {
@@ -175,36 +165,6 @@ async function handleTurn(req, res, body) {
     }
   };
 
-  send({
-    type: "start",
-    chatId: chat.id,
-    turnId: turn.id,
-    title: chat.title,
-    app,
-    engine: ai.mode,
-    userImages: turn.user.images.map((n) => chats.imageUrl(chat.id, n)),
-  });
-
-  // A new chat starts with the first words of the message as its title; the
-  // AI names it properly beside the turn (see titles.mjs). A title the person
-  // set in the meantime wins.
-  if (isNew) {
-    const provisional = chat.title;
-    nameChat(ai, { text, app, files: incoming.map((f) => f.name) }).then((title) => {
-      if (!title || title === provisional) return;
-      const live = runningTurns.get(chat.id)?.chat; // a running turn saves its own copy
-      const target = live || chats.loadChat(chat.id);
-      if (!target || target.title !== provisional) return;
-      target.title = title;
-      if (!live) chats.saveChat(target);
-      send({ type: "title", chatId: chat.id, title });
-    });
-  }
-
-  const watchers = new Map(); // step id -> stop() for its dialog watcher
-
-  // Every engine event passes through here: recorded on the turn, then sent
-  // to the UI in one normalized, plain-language shape.
   const emit = (ev) => {
     switch (ev.type) {
       case "note": {
@@ -228,14 +188,16 @@ async function handleTurn(req, res, body) {
         turn.steps.push(step);
         send({ type: "step", ...step });
         // A dialog in the app blocks the step; say so quietly on the step itself.
-        watchers.set(
-          ev.id,
-          watchForDialog(app, (text) => {
-            if (step.status !== "running") return;
-            step.waiting = text || undefined;
-            send({ type: "step_wait", id: ev.id, text: text || null });
-          }),
-        );
+        if (watchDialogs) {
+          watchers.set(
+            ev.id,
+            watchForDialog(app, (text) => {
+              if (step.status !== "running") return;
+              step.waiting = text || undefined;
+              send({ type: "step_wait", id: ev.id, text: text || null });
+            }),
+          );
+        }
         return persist();
       }
       case "tool_done": {
@@ -289,27 +251,250 @@ async function handleTurn(req, res, body) {
     }
   };
 
-  markBusy(app, true);
-  try {
-    await runTurnFor(ai, { chat, turn, app, text, images, files, effort, emit, signal: controller.signal });
-  } catch (e) {
-    if (!controller.signal.aborted) emit({ type: "error", message: e.message });
-  } finally {
-    markBusy(app, false);
-    clearInterval(heartbeat);
+  // The turn is over: stop the dialog watchers, settle its status and save it.
+  // Returns the "done" event.
+  const finish = ({ aborted = false, started = turn.at } = {}) => {
     for (const stop of watchers.values()) stop();
     watchers.clear();
-    runningTurns.delete(chat.id);
     turn.durationMs = Date.now() - started;
-    if (controller.signal.aborted) turn.status = "stopped";
+    if (aborted) turn.status = "stopped";
     else if (turn.error) turn.status = "error";
     else turn.status = "done";
     // Steps still marked running when a turn ends were cut off.
     for (const s of turn.steps) if (s.status === "running") s.status = turn.status === "stopped" ? "stopped" : "error";
     chats.saveChat(chat);
-    send({ type: "done", status: turn.status, durationMs: turn.durationMs, chatId: chat.id, turnId: turn.id });
+    return { type: "done", status: turn.status, durationMs: turn.durationMs, chatId: chat.id, turnId: turn.id };
+  };
+
+  return { emit, finish };
+}
+
+// A turn run here: the engine runs in this process and its events stream back.
+async function handleTurn(req, res, body) {
+  const ai = effectiveAI();
+  if (!ai.mode) return json(res, 409, { error: "setup_required", message: "Choose an AI in Settings first." });
+  const begun = beginTurn(body, ai.mode);
+  if (begun.error) return json(res, begun.status, begun.error);
+  const { chat, turn, isNew, app, text, images, files, incoming, effort } = begun;
+
+  res.writeHead(200, {
+    "content-type": "text/event-stream",
+    "cache-control": "no-store",
+    connection: "keep-alive",
+    "x-accel-buffering": "no",
+  });
+  req.socket.setTimeout(0);
+  const send = (ev) => {
+    if (!res.writableEnded) res.write(`data: ${JSON.stringify(ev)}\n\n`);
+  };
+  // Long thinking gaps: a comment line every 15 s keeps proxies and fetch alive.
+  const heartbeat = setInterval(() => {
+    if (!res.writableEnded) res.write(`: keepalive\n\n`);
+  }, 15000);
+
+  const controller = new AbortController();
+  runningTurns.set(chat.id, { controller, turnId: turn.id, chat });
+  res.on("close", () => {
+    if (!res.writableFinished) controller.abort();
+  });
+
+  const started = Date.now();
+  const recorder = turnRecorder({ chat, turn, app, send });
+
+  send({
+    type: "start",
+    chatId: chat.id,
+    turnId: turn.id,
+    title: chat.title,
+    app,
+    engine: ai.mode,
+    userImages: turn.user.images.map((n) => chats.imageUrl(chat.id, n)),
+  });
+
+  // A new chat starts with the first words of the message as its title; the
+  // AI names it properly beside the turn (see titles.mjs). A title the person
+  // set in the meantime wins.
+  if (isNew) {
+    const provisional = chat.title;
+    nameChat(ai, { text, app, files: incoming.map((f) => f.name) }).then((title) => {
+      if (!title || title === provisional) return;
+      const live = runningTurns.get(chat.id)?.chat; // a running turn saves its own copy
+      const target = live || chats.loadChat(chat.id);
+      if (!target || target.title !== provisional) return;
+      target.title = title;
+      if (!live) chats.saveChat(target);
+      send({ type: "title", chatId: chat.id, title });
+    });
+  }
+
+  markBusy(app, true);
+  try {
+    await runTurnFor(ai, { chat, turn, app, text, images, files, effort, emit: recorder.emit, signal: controller.signal });
+  } catch (e) {
+    if (!controller.signal.aborted) recorder.emit({ type: "error", message: e.message });
+  } finally {
+    markBusy(app, false);
+    clearInterval(heartbeat);
+    runningTurns.delete(chat.id);
+    send(recorder.finish({ aborted: controller.signal.aborted, started }));
     res.end();
   }
+}
+
+// ---------- turns the web page runs ----------
+// The hosted page keeps API keys in the browser and runs the agent loop there
+// (harness/core/loop.mjs). It starts the turn here (the selection, attachments
+// and history live on this computer), runs every tool through POST /api/tool,
+// and reports its events back so the chat is recorded exactly like a turn run
+// here. There is no relay: if the page goes away mid-turn, the turn stops.
+
+const PAGE_ENGINES = new Set(["anthropic", "gemini", "openai", "invite", "account"]);
+const PAGE_EVENTS = new Set(["note", "tool_run", "tool_done", "final", "error", "refusal", "aborted", "timing"]);
+const LEASE_MS = Number(process.env.KOMPOSIT_PAGE_LEASE_MS) || 90_000; // no word from the page for this long: it was closed
+
+function renewLease(chatId) {
+  const r = runningTurns.get(chatId);
+  if (!r?.page) return;
+  clearTimeout(r.page.lease);
+  r.page.lease = setTimeout(() => endPageTurn(chatId, { aborted: true, reason: "page_closed" }), LEASE_MS);
+  r.page.lease.unref?.();
+}
+
+// Settle a page turn (finished, stopped, or its page went away). Returns the
+// "done" event, or null when no such turn is running.
+function endPageTurn(chatId, { aborted = false, reason = null } = {}) {
+  const r = runningTurns.get(chatId);
+  if (!r?.page) return null;
+  clearTimeout(r.page.lease);
+  runningTurns.delete(chatId);
+  markBusy(r.page.app, false);
+  if (reason) r.page.turn.stopReason = reason;
+  return r.page.recorder.finish({ aborted: aborted || r.page.aborted || r.controller.signal.aborted, started: r.page.started });
+}
+
+async function startPageTurn(res, body) {
+  const engine = String(body.engine || "");
+  if (!PAGE_ENGINES.has(engine)) return json(res, 400, { error: "unknown engine" });
+  const family = body.family === "openai" ? "openai" : "anthropic"; // whose history format (see engines/index.mjs)
+  const begun = beginTurn(body, engine);
+  if (begun.error) return json(res, begun.status, begun.error);
+  const { chat, turn, isNew, app, text, files } = begun;
+
+  const recorder = turnRecorder({ chat, turn, app, send: () => {}, watchDialogs: false });
+  runningTurns.set(chat.id, { controller: new AbortController(), turnId: turn.id, chat, page: { recorder, turn, app, started: Date.now(), lease: null, aborted: false } });
+  renewLease(chat.id);
+  markBusy(app, true);
+
+  let userText = text;
+  try {
+    userText = await withContext({ app, text, files, emit: recorder.emit });
+  } catch {}
+  // One stored history per chat and provider family, as for turns run here.
+  if (chat.apiFamily && chat.apiFamily !== family) chats.resetApiHistory(chat.id);
+  chat.apiFamily = family;
+  chats.saveChat(chat);
+  renewLease(chat.id); // reading the selection can take seconds: the page's clock starts now
+
+  return json(res, 200, {
+    chatId: chat.id,
+    turnId: turn.id,
+    title: chat.title,
+    isNew,
+    userImages: turn.user.images.map((n) => chats.imageUrl(chat.id, n)),
+    notes: turn.steps.filter((s) => s.kind === "note").map((s) => s.text),
+    text: userText,
+    history: chats.loadApiHistory(chat.id),
+    mod: platform.keys.mod,
+    maxToolCalls: env.maxToolCalls,
+  });
+}
+
+// The page's events for its running turn, the new tail of the model history,
+// and (at the end) the outcome. Also its heartbeat: an empty call keeps the
+// turn alive while the model thinks.
+function recordPageTurn(res, body) {
+  const r = runningTurns.get(body.chatId);
+  if (!r?.page || r.turnId !== body.turnId) return json(res, 409, { error: "not_running", message: "This turn isn't running any more." });
+  renewLease(body.chatId);
+  const events = Array.isArray(body.events) ? body.events.slice(0, 500) : [];
+  for (const ev of events) {
+    if (!ev || typeof ev !== "object" || !PAGE_EVENTS.has(ev.type)) continue;
+    const e = { ...ev };
+    if (e.type === "tool_done") e.image = cleanImages(e.image ? [e.image] : [])[0] || null;
+    if (e.type === "aborted") r.page.aborted = true;
+    r.page.recorder.emit(e);
+  }
+  if (body.history) {
+    // The history is append-only, so the page sends only what changed: the
+    // messages from index `from` on.
+    const from = body.history.from;
+    const tail = body.history.messages;
+    const stored = chats.loadApiHistory(r.chat.id);
+    if (!Number.isInteger(from) || from < 0 || from > stored.length || !Array.isArray(tail)) return json(res, 400, { error: "bad history" });
+    chats.saveApiHistory(r.chat.id, stored.slice(0, from).concat(tail));
+  }
+  if (body.end) return json(res, 200, { ok: true, ...endPageTurn(body.chatId, { aborted: body.end.status === "stopped" }) });
+  return json(res, 200, { ok: true });
+}
+
+// POST /api/tool {app, name, input[, chatId, turnId]}: run one tool call on
+// this computer and return its result, for the agent loop in the web page.
+// The same validation, dialog notice and incident log as a turn run here.
+// With Accept: text/event-stream it streams "wait" events (a dialog in the app
+// is holding the step up) before the result.
+async function handleTool(req, res, body) {
+  const app = body.app;
+  if (!APPS.includes(app)) return json(res, 400, { error: "unknown app" });
+  const name = String(body.name || "");
+  const input = body.input && typeof body.input === "object" && !Array.isArray(body.input) ? body.input : null;
+  let page = null;
+  if (body.chatId !== undefined) {
+    page = runningTurns.get(body.chatId);
+    if (!page?.page || page.turnId !== body.turnId) return json(res, 409, { error: "not_running", message: "This turn isn't running any more." });
+    renewLease(body.chatId);
+  }
+  const stream = /text\/event-stream/.test(String(req.headers.accept || ""));
+  const invalid = validateToolInput(name, input);
+  if (invalid) {
+    const out = { content: `INVALID_INPUT: ${invalid}. Send the call again with complete input.`, is_error: true, meta: { display: invalid } };
+    if (!stream) return json(res, 200, out);
+  }
+
+  let send = () => {};
+  let heartbeat = null;
+  if (stream) {
+    res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive", "x-accel-buffering": "no" });
+    req.socket.setTimeout(0);
+    send = (ev) => {
+      if (!res.writableEnded) res.write(`data: ${JSON.stringify(ev)}\n\n`);
+    };
+    heartbeat = setInterval(() => {
+      if (!res.writableEnded) res.write(`: keepalive\n\n`);
+    }, 15000);
+  }
+  if (invalid) {
+    send({ type: "result", content: `INVALID_INPUT: ${invalid}. Send the call again with complete input.`, is_error: true, meta: { display: invalid } });
+    clearInterval(heartbeat);
+    return res.end();
+  }
+
+  const stopWatch = watchForDialog(app, (text) => send({ type: "wait", text: text || null }));
+  // A long step (an After Effects render) must not let the page's turn lapse.
+  const keepAlive = page ? setInterval(() => renewLease(body.chatId), 20000) : null;
+  if (!page) markBusy(app, true);
+  let r;
+  try {
+    r = await executeTool(getBridge(app), name, input);
+  } finally {
+    stopWatch();
+    clearInterval(keepAlive);
+    if (!page) markBusy(app, false);
+  }
+  const out = { content: r.content, is_error: !!r.is_error, meta: r.meta || {} };
+  if (!stream) return json(res, 200, out);
+  send({ type: "result", ...out });
+  clearInterval(heartbeat);
+  res.end();
 }
 
 // A preview video the After Effects bridge rendered into the scratch folder:
@@ -375,6 +560,10 @@ function makeHandler(port) {
           efforts: Object.keys(EFFORTS),
           dataDir: DATA_DIR,
           webOrigins: webOrigins(),
+          // What this app can do for the web page: run tools for it, and
+          // record the turns it runs itself. `mod`: this computer's Cmd/Ctrl.
+          features: ["tool", "page-turns"],
+          mod: platform.keys.mod,
         });
       }
 
@@ -477,11 +666,23 @@ function makeHandler(port) {
           return json(res, 200, { chat: c, running: runningTurns.has(id) });
         }
         if (!sub && req.method === "DELETE") {
-          runningTurns.get(id)?.controller.abort();
+          const r = runningTurns.get(id);
+          r?.controller.abort();
+          if (r?.page) {
+            clearTimeout(r.page.lease);
+            runningTurns.delete(id);
+            markBusy(r.page.app, false);
+          }
           return json(res, 200, { ok: chats.deleteChat(id) });
         }
         if (sub === "rename" && req.method === "POST") {
           const body = await readBody(req);
+          // ifTitle: rename only if the title is still that one (the page
+          // naming a new chat never overrides a name the person gave it).
+          if (typeof body.ifTitle === "string") {
+            const cur = runningTurns.get(id)?.chat || chats.loadChat(id);
+            if (cur && cur.title !== body.ifTitle) return json(res, 409, { error: "renamed", title: cur.title });
+          }
           const c = chats.renameChat(id, body.title);
           const live = runningTurns.get(id)?.chat; // or the running turn would save the old title back
           if (c && live) live.title = c.title;
@@ -502,12 +703,19 @@ function makeHandler(port) {
         const body = await readBody(req);
         const r = runningTurns.get(body.chatId);
         if (r) r.controller.abort();
+        if (r?.page) endPageTurn(body.chatId, { aborted: true });
         return json(res, 200, { ok: !!r });
       }
 
       if (req.method === "POST" && p === "/api/turn") {
         const body = await readBody(req);
         return handleTurn(req, res, body);
+      }
+      if (req.method === "POST" && p === "/api/turn/start") return startPageTurn(res, await readBody(req));
+      if (req.method === "POST" && p === "/api/turn/record") return recordPageTurn(res, await readBody(req));
+      if (req.method === "POST" && p === "/api/tool") {
+        const body = await readBody(req);
+        return handleTool(req, res, body);
       }
 
       return json(res, 404, { error: "not found" });
@@ -559,8 +767,12 @@ async function start() {
 // Quitting the app sends SIGTERM: stop any running turn first (that kills
 // Claude Code's process group, which would otherwise keep editing), then exit.
 function shutdown() {
-  for (const r of runningTurns.values()) r.controller.abort();
-  setTimeout(() => process.exit(0), runningTurns.size ? 800 : 0);
+  const busy = runningTurns.size;
+  for (const [id, r] of [...runningTurns]) {
+    r.controller.abort();
+    if (r.page) endPageTurn(id, { aborted: true });
+  }
+  setTimeout(() => process.exit(0), busy ? 800 : 0);
 }
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);

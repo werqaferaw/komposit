@@ -26,15 +26,19 @@ export const EFFORTS = {
   high: { label: "Thorough", cli: { model: "opus", effort: "high" }, api: "high" },
 };
 
-export async function runTurnFor(ai, { chat, app, text, images, files = [], effort, emit, signal }) {
-  const lvl = EFFORTS[effort] || EFFORTS.medium;
-
-  // The live selection goes in front of the message (the model reads it; the
-  // chat shows the person's own words), plus one quiet step line.
+// The live selection goes in front of the message (the model reads it; the
+// chat shows the person's own words), plus one quiet step line, then the list
+// of attached files. Also used for turns the web page runs (server.mjs).
+export async function withContext({ app, text, files = [], emit }) {
   const sel = await readSelection(app);
   const note = selectionNote(app, sel);
   if (note) emit({ type: "note", text: note });
-  text = selectionBlock(app, sel) + filesBlock(files) + (text || "");
+  return selectionBlock(app, sel) + filesBlock(files) + (text || "");
+}
+
+export async function runTurnFor(ai, { chat, app, text, images, files = [], effort, emit, signal }) {
+  const lvl = EFFORTS[effort] || EFFORTS.medium;
+  text = await withContext({ app, text, files, emit });
 
   if (ai.mode === "claude-code") {
     chat.cli = chat.cli || {};

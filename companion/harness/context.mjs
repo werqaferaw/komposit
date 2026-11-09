@@ -6,6 +6,7 @@ import { getBridge } from "../bridges/index.mjs";
 import { runningApps } from "../desktop.mjs";
 
 export async function readSelection(app, { timeoutMs = 6000 } = {}) {
+  if (process.env.KOMPOSIT_SKIP_SELECTION === "1") return null; // tests: never reach into the person's apps
   let bridge;
   try {
     bridge = getBridge(app);
