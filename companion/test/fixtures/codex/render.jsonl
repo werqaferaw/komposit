@@ -1,0 +1,7 @@
+{"type":"thread.started","thread_id":"00000000-0000-7000-8000-000000000002"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"I’ll render the document once and identify its main color."}}
+{"type":"item.started","item":{"id":"item_1","type":"mcp_tool_call","server":"komposit","tool":"render","arguments":{},"result":null,"error":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_1","type":"mcp_tool_call","server":"komposit","tool":"render","arguments":{},"result":{"content":[{"type":"image","data":"iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAFklEQVR4nGMQUbQlCTGMahjVMHw1AAB0QnIBlP7A2QAAAABJRU5ErkJggg==","mimeType":"image/png"},{"type":"text","text":"Rendered artboard 1."}],"structured_content":null},"error":null,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"The document is a very dark navy blue."}}
+{"type":"turn.completed","usage":{"input_tokens":16452,"cached_input_tokens":7936,"cache_write_input_tokens":0,"output_tokens":92,"reasoning_output_tokens":0}}

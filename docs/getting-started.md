@@ -14,6 +14,7 @@ About 5 minutes from download to your first edit.
 - Illustrator, Photoshop or After Effects.
 - One of these for the AI:
   - a **Claude Pro or Max** plan, with Claude Code installed;
+  - a **ChatGPT Plus or Pro** plan, with Codex installed;
   - an **Anthropic API key**;
   - a **Google Gemini API key** (free to create at [aistudio.google.com](https://aistudio.google.com), under Get API key);
   - an **OpenRouter** (or other OpenAI-compatible) key, with a model that can see images;
@@ -55,6 +56,10 @@ with real Adobe apps on Windows yet. Please [open an issue](https://github.com/w
    - **Claude subscription:** if Claude Code isn't installed yet, the page shows a
      one-line install command (Terminal on a Mac, PowerShell on Windows). Run
      `claude` once to sign in, then click *Check again*.
+   - **ChatGPT subscription (Codex):** install Codex with
+     `npm install -g @openai/codex` (it needs Node.js), run `codex login` and
+     sign in with your ChatGPT account, then click *Check again*. Komposit uses
+     only your ChatGPT plan, never an API key.
    - **Key or invite code:** paste it; Komposit checks it before saving. It stays on your computer.
 2. **Connect your Adobe apps.** Open the apps you use.
    - **Mac:** click **Allow** for each. macOS asks *"Komposit wants access to control
@@ -91,6 +96,7 @@ the same.
 | "Komposit isn't running" | Mac: open Komposit from Applications (look for the menu-bar icon). Windows: open Komposit from the Start menu (look for the tray icon). |
 | "not allowed to control …" (Mac) | System Settings > Privacy & Security > Automation > Komposit: turn on the app |
 | Claude Code "not signed in" | Run `claude` in Terminal (Mac) or PowerShell (Windows) and sign in, then try again |
+| Codex "isn't signed in to ChatGPT" or "signed in with an API key" | Run `codex login` in Terminal (Mac) or PowerShell (Windows) and sign in with your ChatGPT account, then try again |
 | A step says the app "seems to be showing a dialog" | Switch to the app, close the dialog; Komposit carries on |
 | After Effects: nothing works | Turn on **Allow Scripts to Write Files and Access Network**: Mac: After Effects > Settings > Scripting & Expressions; Windows: Edit > Preferences > Scripting & Expressions. After a crash, choose **Continue** (Safe Mode turns scripts off). |
 | After Effects was just opened | Wait until it has finished starting before sending a request |

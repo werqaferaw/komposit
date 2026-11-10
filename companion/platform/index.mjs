@@ -15,7 +15,7 @@
 //   BUNDLE_IDS, installedApps(), launchApp(app)
 //   helperPath(), automationState(app, {ask}), openSettingsPane(kind)
 //   openPath(path), thumbnail(path, outDir, cachedPath)
-//   loginPath(run), extraBinDirs(), systemPathDirs, claudeNames
+//   loginPath(run), extraBinDirs(), systemPathDirs, claudeNames, codexNames
 //   groupSpawnOptions, killTree(child), watchParent(onOrphan)
 import * as mac from "./mac.mjs";
 import * as win from "./win.mjs";

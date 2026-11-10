@@ -27,7 +27,8 @@ const ALLOWED = TOOL_NAMES.map((t) => `mcp__komposit__${t}`);
 // keeps Komposit's sessions together (and resumable after a restart).
 const WORK_DIR = join(DATA_DIR, "claude-code");
 
-function steerFor(app) {
+// The prompt Komposit adds for an app. The Codex engine sends the same text.
+export function steerFor(app) {
   return (
     `You are Komposit, working in the user's live Adobe ${app} document through the komposit MCP tools ` +
     `(inspect, edit, render, export, save, preflight, undo). Use ONLY those tools; do not use Bash, Write, or any other tool. ` +

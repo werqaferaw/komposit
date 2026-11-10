@@ -399,6 +399,9 @@ export const systemPathDirs = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"];
 // File names a `claude` executable can have, in order of preference.
 export const claudeNames = ["claude"];
 
+// File names a `codex` executable can have (npm's is a Node launcher script).
+export const codexNames = ["codex"];
+
 // ---------- child processes ----------
 
 // Options for a child that Stop must be able to kill with everything it

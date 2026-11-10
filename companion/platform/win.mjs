@@ -631,6 +631,10 @@ export const systemPathDirs = [];
 // a shell would have to quote the person's whole message.
 export const claudeNames = ["claude.exe"];
 
+// The same for Codex. npm only puts codex.cmd on the PATH; shellenv.mjs then
+// finds the native codex.exe inside the npm package.
+export const codexNames = ["codex.exe"];
+
 // ---------- child processes ----------
 
 // No process groups on Windows; hide the console window instead.
