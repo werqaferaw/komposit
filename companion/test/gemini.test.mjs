@@ -64,6 +64,14 @@ const server = createServer(async (req, res) => {
     return res.end(JSON.stringify({ object: "list", data: ids.map((id) => ({ id, object: "model", owned_by: "google" })) }));
   }
   const name = script.shift();
+  if (name === "busy503") {
+    res.writeHead(503, { "content-type": "application/json", "retry-after": "0.01" });
+    return res.end(JSON.stringify([{ error: { code: 503, message: "This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.", status: "UNAVAILABLE" } }]));
+  }
+  if (name === "quota429") {
+    res.writeHead(429, { "content-type": "application/json" });
+    return res.end(JSON.stringify([{ error: { code: 429, message: "You exceeded your current quota, please check your plan and billing details.", status: "RESOURCE_EXHAUSTED" } }]));
+  }
   res.writeHead(200, { "content-type": "text/event-stream" });
   for (const c of REPLIES[name] || []) res.write(frame(c));
   res.end("data: [DONE]\n\n");
@@ -189,6 +197,26 @@ test("a full turn: signatures survive the loop's history, call ids stay unique, 
   assert.deepEqual(messages.at(-1).content[0], { type: "extra_content", extra_content: { google: { thought_signature: TEXT_SIG } } });
 });
 
+test("a busy model (503, high demand) is tried again; a quota refusal is not", async () => {
+  script = ["busy503", "busy503", "final"];
+  const events = [];
+  const n = seen.length;
+  const r = await openai.stream({ system: "sys", messages: [{ role: "user", content: "hi" }], model: "gemini-3.8-flash", creds: CREDS, onEvent: (e) => events.push(e) });
+  assert.equal(seen.length - n, 3, "two retries, then the answer");
+  assert.equal(r.content.find((b) => b.type === "text").text, "Renamed the first layer to Hi.");
+  assert.equal(events.filter((e) => e.type === "warning").length, 2);
+
+  script = ["quota429", "final"];
+  const m = seen.length;
+  const err = await openai.stream({ system: "sys", messages: [{ role: "user", content: "hi" }], model: "gemini-4-argon", creds: CREDS }).then(() => null, (e) => e);
+  assert.equal(seen.length - m, 1, "no retry on a quota refusal");
+  assert.equal(openai.explainError(err).code, "quota");
+  script = [];
+
+  const busy = Object.assign(new Error("x"), { status: 503, detail: "This model is currently experiencing high demand." });
+  assert.deepEqual(openai.explainError(busy), { message: "The model is overloaded right now (high demand). Try again in a minute.", code: "overloaded" });
+});
+
 test("errors read plainly: a refused key says so and offers Settings", async () => {
   const e = Object.assign(new Error("Model request failed (400): API key not valid"), { status: 400, detail: '[{"error":{"message":"API key not valid. Please pass a valid API key.","status":"INVALID_ARGUMENT"}}]' });
   assert.deepEqual(openai.explainError(e), { message: "The API key was not accepted by the AI service. Check it in Settings.", code: "auth" });
@@ -199,22 +227,56 @@ test("errors read plainly: a refused key says so and offers Settings", async () 
   assert.deepEqual(openai.explainError(new Error("Could not reach x")), { message: "Could not reach x", code: null });
 });
 
-test("the key check picks the best model the key can use, and a fast one for titles", async () => {
-  let r = await checkGeminiKey("good", { baseUrl: BASE });
-  assert.deepEqual(r, { ok: true, model: "gemini-4-argon", titleModel: "gemini-3.8-flash" });
-  r = await checkGeminiKey("good", { baseUrl: BASE, model: "models/gemini-3.8-flash" });
-  assert.deepEqual(r, { ok: true, model: "gemini-3.8-flash", titleModel: "gemini-3.8-flash" });
-  r = await checkGeminiKey("good", { baseUrl: BASE, model: "gemini-0-nope" });
+test("the key check picks the best model the key can really use, and a fast one for titles", async () => {
+  const all = { probe: async () => ({ usable: true }) };
+  // Without billing, Pro-class models are listed but have no quota.
+  const noBilling = { probe: async (k, id) => (/argon|pro/.test(id) ? { usable: false, status: 429, quota: true } : { usable: true }) };
+  let r = await checkGeminiKey("good", { baseUrl: BASE, ...all });
+  assert.deepEqual(r, { ok: true, model: "gemini-4-argon", titleModel: "gemini-3.8-flash", pinned: false });
+  r = await checkGeminiKey("good", { baseUrl: BASE, ...noBilling });
+  assert.deepEqual(r, { ok: true, model: "gemini-3.8-flash", titleModel: "gemini-3.8-flash", pinned: false });
+  r = await checkGeminiKey("good", { baseUrl: BASE, model: "models/gemini-3.8-flash", ...all });
+  assert.deepEqual(r, { ok: true, model: "gemini-3.8-flash", titleModel: "gemini-3.8-flash", pinned: true });
+  r = await checkGeminiKey("good", { baseUrl: BASE, model: "gemini-4-argon", ...noBilling });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /billing/);
+  r = await checkGeminiKey("good", { baseUrl: BASE, model: "gemini-0-nope", ...all });
   assert.equal(r.ok, false);
   assert.match(r.error, /can't use gemini-0-nope/);
+  r = await checkGeminiKey("good", { baseUrl: BASE, probe: async () => ({ usable: false, quota: true }) });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /can't use any Gemini model/);
   // Models renamed since this build: the newest general model, Pro-class first, never TTS.
-  r = await checkGeminiKey("renamed", { baseUrl: BASE });
-  assert.deepEqual(r, { ok: true, model: "gemini-9-pro", titleModel: "gemini-9-pro" });
-  r = await checkGeminiKey("bad", { baseUrl: BASE });
+  r = await checkGeminiKey("renamed", { baseUrl: BASE, ...all });
+  assert.deepEqual(r, { ok: true, model: "gemini-9-pro", titleModel: "gemini-9-pro", pinned: false });
+  r = await checkGeminiKey("bad", { baseUrl: BASE, ...all });
   assert.deepEqual(r, { ok: false, error: "That key was not accepted by Google." });
-  r = await checkGeminiKey("x", { baseUrl: "http://127.0.0.1:9" });
+  r = await checkGeminiKey("x", { baseUrl: "http://127.0.0.1:9", ...all });
   assert.equal(r.ok, false);
   assert.match(r.error, /Could not reach Google/);
+});
+
+test("a model check stops at the first sign of an answer and reads quota refusals", async () => {
+  const { modelAnswers } = await import("../providers/keys.mjs");
+  const real = globalThis.fetch;
+  let aborted = false;
+  try {
+    globalThis.fetch = async (url, init) => {
+      init.signal.addEventListener("abort", () => (aborted = true));
+      return new Response("data: {}\n\n", { status: 200, headers: { "content-type": "text/event-stream" } });
+    };
+    assert.deepEqual(await modelAnswers("k", "gemini-3.8-flash", BASE), { usable: true, status: 200, quota: false });
+    assert.ok(aborted, "the reply is stopped after the check");
+    globalThis.fetch = async () => new Response(JSON.stringify([{ error: { code: 429, message: "You exceeded your current quota", status: "RESOURCE_EXHAUSTED" } }]), { status: 429 });
+    assert.deepEqual(await modelAnswers("k", "gemini-4-argon", BASE), { usable: false, status: 429, quota: true });
+    // Still thinking after the wait: no refusal came, so it's usable.
+    globalThis.fetch = (url, init) => new Promise((_, rej) => init.signal.addEventListener("abort", () => rej(new Error("aborted"))));
+    assert.deepEqual(await modelAnswers("k", "gemini-4-argon", BASE, { waitMs: 50 }), { usable: true, status: null });
+  } finally {
+    globalThis.fetch = real;
+  }
+  const quota = Object.assign(new Error("Model request failed (429)"), { status: 429, detail: "RESOURCE_EXHAUSTED: quota" });
+  assert.equal(openai.explainError(quota).code, "quota");
 });
 
 test("chat titles go to Google with the fast model and little thinking", async () => {

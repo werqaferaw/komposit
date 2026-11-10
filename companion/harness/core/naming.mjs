@@ -82,7 +82,8 @@ export async function nameWithApi(ai, { text, app, files = [] } = {}, { gateway 
   if (!String(text || "").trim() && !files.length) return "";
   const prompt = titlePrompt({ text, app, files });
   const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
+  // Gemini can take a minute or two to answer even a short request.
+  const timer = setTimeout(() => ctl.abort(), ai?.mode === "gemini" ? 150_000 : TIMEOUT_MS);
   try {
     let raw = "";
     if (ai?.mode === "anthropic") raw = await viaAnthropic(prompt, { apiKey: ai.anthropic?.apiKey, baseUrl: ai.anthropic?.baseUrl }, ctl.signal);

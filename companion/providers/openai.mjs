@@ -35,12 +35,14 @@ const KEY_NAME = { openrouter: "OpenRouter", openai: "OpenAI", gemini: "Gemini" 
 const SHOTS_INTRO = "Screenshots returned by the tools above:";
 
 // Google Gemini with a key from AI Studio, through its OpenAI-compatible endpoint.
-// When a key is saved, setup picks the first model in `models` the key can use
-// (best first) and the first of `titleModels` (fast) to name chats.
+// When a key is saved, the key check picks the first model in `models` the key
+// can actually use (best first: a key without billing lists the Pro-class
+// models but has no quota for them) and the first of `titleModels` (fast) to
+// name chats.
 export const GEMINI = {
   baseUrl: DEFAULT_BASE_URL.gemini,
-  models: ["gemini-4-argon", "gemini-3.1-pro-preview", "gemini-3.8-flash", "gemini-3.6-flash", "gemini-3-pro-preview", "gemini-3-flash-preview", "gemini-2.5-pro"],
-  titleModels: ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3-flash-preview", "gemini-2.5-flash"],
+  models: ["gemini-4-argon", "gemini-3.1-pro-preview", "gemini-3.8-flash", "gemini-3.6-flash", "gemini-3-pro-preview", "gemini-3-flash-preview"],
+  titleModels: ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3-flash-preview"],
 };
 // Google's documented placeholder for a function call that has no signature of
 // its own (made by another model earlier in the chat): it skips the check for
@@ -105,7 +107,7 @@ async function stream({
     }
   };
 
-  let res = await post(body);
+  let res = await postRetrying(post, body, { signal, onEvent });
   // Safety net for the reasoning round trip: if a request that carried
   // reasoning_details is rejected with a 400 (say our fragment merge isn't what
   // the model signed), send it once more without them rather than break a
@@ -306,7 +308,13 @@ export function explainError(e) {
   if (status === 401 || status === 403 || /api key not valid|invalid api key|incorrect api key|API_KEY_INVALID/i.test(detail)) {
     return { message: "The API key was not accepted by the AI service. Check it in Settings.", code: "auth" };
   }
+  if (status === 429 && /quota|RESOURCE_EXHAUSTED|billing/i.test(detail)) {
+    return { message: "This key has no quota left for this model. Check its plan or billing with the AI service, or save the key again in Settings to switch to a model it can use.", code: "quota" };
+  }
   if (status === 429) return { message: "The AI service is rate limiting this key. Wait a moment and try again.", code: "rate_limit" };
+  if ((status === 503 || status === 529) && /demand|overload|unavailable/i.test(detail)) {
+    return { message: "The model is overloaded right now (high demand). Try again in a minute.", code: "overloaded" };
+  }
   if (status >= 500) return { message: `The AI service had a server problem (${status}). Try again.`, code: "server" };
   return { message: e?.message || String(e), code: status === 400 ? "bad_request" : null };
 }
@@ -325,6 +333,41 @@ export function inferFlavor(baseUrl) {
   if (host === "api.openai.com") return "openai";
   if (host === "generativelanguage.googleapis.com") return "gemini";
   return "generic";
+}
+
+// Busy servers: a model under high demand answers 503 (Gemini says so often),
+// and gateways 502/504. Those, and a 429 that isn't about quota, are tried
+// again after a pause (the server's Retry-After when it gives one), a few
+// times, before the error reaches the person. Anything else is final.
+const RETRY_STATUS = new Set([502, 503, 504, 529]);
+const RETRY_WAITS = [2000, 4000, 8000, 16000];
+
+async function postRetrying(post, payload, { signal, onEvent }) {
+  let res = await post(payload);
+  for (const base of RETRY_WAITS) {
+    if (!RETRY_STATUS.has(res.status) && res.status !== 429) return res;
+    const detail = await res.text().catch(() => "");
+    if (res.status === 429 && /quota|RESOURCE_EXHAUSTED|billing/i.test(detail)) {
+      throw Object.assign(new Error(`Model request failed (429): ${detail.slice(0, 500)}`), { status: 429, detail });
+    }
+    const after = Number(res.headers.get("retry-after"));
+    const wait = Number.isFinite(after) && after > 0 ? Math.min(after * 1000, 30000) : base + Math.floor(Math.random() * 500);
+    onEvent({ type: "warning", message: `the service answered ${res.status}; trying again in ${Math.round(wait / 1000)} s` });
+    await pause(wait, signal);
+    res = await post(payload);
+  }
+  return res;
+}
+
+function pause(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(signal.reason || new DOMException("Aborted", "AbortError"));
+    const t = setTimeout(resolve, ms);
+    signal?.addEventListener("abort", () => {
+      clearTimeout(t);
+      reject(signal.reason || new DOMException("Aborted", "AbortError"));
+    }, { once: true });
+  });
 }
 
 const isObject = (v) => !!v && typeof v === "object" && !Array.isArray(v);

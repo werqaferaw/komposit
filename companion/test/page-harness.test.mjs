@@ -224,8 +224,9 @@ maybe("chats are named from the page, never throwing", async () => {
 });
 
 maybe("keys are checked from the page too", async () => {
-  answer = (url) => (url.endsWith("/models") ? new Response(JSON.stringify({ data: [{ id: "models/gemini-4-argon" }, { id: "models/gemini-3.8-flash" }] }), { status: 200 }) : new Response("", { status: 404 }));
-  assert.deepEqual({ ...(await H.keys.checkGeminiKey("AIza-page")) }, { ok: true, model: "gemini-4-argon", titleModel: "gemini-3.8-flash" });
+  // Listed models, and every model answers (billing on).
+  answer = (url) => (url.endsWith("/models") ? new Response(JSON.stringify({ data: [{ id: "models/gemini-4-argon" }, { id: "models/gemini-3.8-flash" }] }), { status: 200 }) : sse(["data: {}\n\n"]));
+  assert.deepEqual({ ...(await H.keys.checkGeminiKey("AIza-page")) }, { ok: true, model: "gemini-4-argon", titleModel: "gemini-3.8-flash", pinned: false });
   answer = () => new Response(JSON.stringify({ error: { message: "API key not valid" } }), { status: 400 });
   assert.equal((await H.keys.checkGeminiKey("bad")).ok, false);
 });

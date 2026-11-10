@@ -346,7 +346,10 @@ async function handleTurn(req, res, body) {
 // (harness/core/loop.mjs). It starts the turn here (the selection, attachments
 // and history live on this computer), runs every tool through POST /api/tool,
 // and reports its events back so the chat is recorded exactly like a turn run
-// here. There is no relay: if the page goes away mid-turn, the turn stops.
+// here. Each answer carries the same normalized events a turn run here
+// streams (plain-language steps, image and video links), so the page draws
+// them the same way. There is no relay: if the page goes away mid-turn, the
+// turn stops.
 
 const PAGE_ENGINES = new Set(["anthropic", "gemini", "openai", "invite", "account"]);
 const PAGE_EVENTS = new Set(["note", "tool_run", "tool_done", "final", "error", "refusal", "aborted", "timing"]);
@@ -380,8 +383,9 @@ async function startPageTurn(res, body) {
   if (begun.error) return json(res, begun.status, begun.error);
   const { chat, turn, isNew, app, text, files } = begun;
 
-  const recorder = turnRecorder({ chat, turn, app, send: () => {}, watchDialogs: false });
-  runningTurns.set(chat.id, { controller: new AbortController(), turnId: turn.id, chat, page: { recorder, turn, app, started: Date.now(), lease: null, aborted: false } });
+  const outbox = []; // normalized events for the page, handed over with each answer
+  const recorder = turnRecorder({ chat, turn, app, send: (ev) => outbox.push(ev), watchDialogs: false });
+  runningTurns.set(chat.id, { controller: new AbortController(), turnId: turn.id, chat, page: { recorder, turn, app, outbox, started: Date.now(), lease: null, aborted: false } });
   renewLease(chat.id);
   markBusy(app, true);
 
@@ -401,7 +405,7 @@ async function startPageTurn(res, body) {
     title: chat.title,
     isNew,
     userImages: turn.user.images.map((n) => chats.imageUrl(chat.id, n)),
-    notes: turn.steps.filter((s) => s.kind === "note").map((s) => s.text),
+    events: outbox.splice(0),
     text: userText,
     history: chats.loadApiHistory(chat.id),
     mod: platform.keys.mod,
@@ -416,8 +420,8 @@ function recordPageTurn(res, body) {
   const r = runningTurns.get(body.chatId);
   if (!r?.page || r.turnId !== body.turnId) return json(res, 409, { error: "not_running", message: "This turn isn't running any more." });
   renewLease(body.chatId);
-  const events = Array.isArray(body.events) ? body.events.slice(0, 500) : [];
-  for (const ev of events) {
+  const incoming = Array.isArray(body.events) ? body.events.slice(0, 500) : [];
+  for (const ev of incoming) {
     if (!ev || typeof ev !== "object" || !PAGE_EVENTS.has(ev.type)) continue;
     const e = { ...ev };
     if (e.type === "tool_done") e.image = cleanImages(e.image ? [e.image] : [])[0] || null;
@@ -433,8 +437,12 @@ function recordPageTurn(res, body) {
     if (!Number.isInteger(from) || from < 0 || from > stored.length || !Array.isArray(tail)) return json(res, 400, { error: "bad history" });
     chats.saveApiHistory(r.chat.id, stored.slice(0, from).concat(tail));
   }
-  if (body.end) return json(res, 200, { ok: true, ...endPageTurn(body.chatId, { aborted: body.end.status === "stopped" }) });
-  return json(res, 200, { ok: true });
+  const events = r.page.outbox.splice(0);
+  if (body.end) {
+    const done = endPageTurn(body.chatId, { aborted: body.end.status === "stopped" });
+    return json(res, 200, { ok: true, ...done, events: [...events, done] });
+  }
+  return json(res, 200, { ok: true, events });
 }
 
 // POST /api/tool {app, name, input[, chatId, turnId]}: run one tool call on

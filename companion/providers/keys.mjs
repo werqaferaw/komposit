@@ -49,9 +49,9 @@ export async function checkOpenAIKey({ apiKey, baseUrl }) {
 }
 
 // A Gemini key: list the models it may use (the OpenAI-compatible endpoint),
-// then pick the best one for turns and a fast one for chat titles. A model the
-// person named is kept as long as the key can use it.
-export async function checkGeminiKey(apiKey, { model = "", baseUrl = GEMINI.baseUrl } = {}) {
+// then pick the best one that really answers for turns and a fast one for chat
+// titles. A model the person named is kept as long as the key can use it.
+export async function checkGeminiKey(apiKey, { model = "", baseUrl = GEMINI.baseUrl, probe = modelAnswers } = {}) {
   let res;
   try {
     res = await fetch(`${baseUrl}/models`, { headers: { authorization: `Bearer ${apiKey}` }, signal: AbortSignal.timeout(15000) });
@@ -71,8 +71,52 @@ export async function checkGeminiKey(apiKey, { model = "", baseUrl = GEMINI.base
   const has = (id) => ids.includes(id);
   const want = String(model || "").trim().replace(/^models\//, "");
   if (want && ids.length && !has(want)) return { ok: false, error: `This key can't use ${want}. Leave the model empty to use the best one available.` };
-  const chosen = want || GEMINI.models.find(has) || newestListed(ids) || GEMINI.models[0];
-  return { ok: true, model: chosen, titleModel: GEMINI.titleModels.find(has) || chosen };
+
+  // The first candidate the key really may call (listed is not enough: a key
+  // without billing lists models it has no quota for).
+  const first = async (list) => {
+    for (const id of list) if ((await probe(apiKey, id, baseUrl)).usable) return id;
+    return null;
+  };
+  let chosen = want;
+  if (want) {
+    const p = await probe(apiKey, want, baseUrl);
+    if (!p.usable) return { ok: false, error: `This key can't use ${want} right now${p.quota ? " (no quota: Pro-class models need billing turned on in Google AI Studio)" : ""}. Leave the model empty to use the best one it can.` };
+  } else {
+    const listed = [...GEMINI.models.filter(has), ...[newestListed(ids)].filter((id) => id && !GEMINI.models.includes(id))];
+    chosen = (await first(listed.length ? listed : GEMINI.models)) || null;
+    if (!chosen) return { ok: false, error: "This key can't use any Gemini model right now (no quota). Check the key's plan or billing in Google AI Studio." };
+  }
+  const titleModel = (await first(GEMINI.titleModels.filter(has))) || chosen;
+  return { ok: true, model: chosen, titleModel, pinned: !!want };
+}
+
+// Does this model answer this key right now? Asks for a streamed reply and
+// stops as soon as the answer starts, so nothing much is generated. A quota
+// or not-found answer comes back at once; a model that's still quiet after a
+// few seconds is thinking about its reply, so it's usable.
+export async function modelAnswers(apiKey, model, baseUrl = GEMINI.baseUrl, { waitMs = 8000 } = {}) {
+  const ctl = new AbortController();
+  let timer;
+  try {
+    const res = await Promise.race([
+      fetch(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+        body: JSON.stringify({ model, messages: [{ role: "user", content: "Reply with OK." }], stream: true, max_tokens: 64, reasoning_effort: "low" }),
+        signal: ctl.signal,
+      }),
+      new Promise((resolve) => (timer = setTimeout(() => resolve(null), waitMs))),
+    ]);
+    if (!res) return { usable: true, status: null };
+    const detail = res.ok ? "" : await res.text().catch(() => "");
+    return { usable: res.ok, status: res.status, quota: res.status === 429 && /quota|RESOURCE_EXHAUSTED|billing/i.test(detail) };
+  } catch (e) {
+    return { usable: false, status: 0 };
+  } finally {
+    clearTimeout(timer);
+    ctl.abort(); // stop the reply: this was only a check
+  }
 }
 
 // When Google has renamed its models since this build: the newest general

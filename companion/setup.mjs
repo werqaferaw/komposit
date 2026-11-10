@@ -179,13 +179,15 @@ export async function saveAI(body = {}) {
   if (mode === "gemini") {
     const apiKey = String(body.apiKey || c.ai.gemini?.apiKey || "").trim();
     if (!apiKey) return { ok: false, error: "Paste your Gemini API key." };
-    // A new key picks the best model afresh unless one was named; the same key keeps its model.
+    // The best model the key can use is picked afresh on every save (billing
+    // turned on since means a better one), unless the person named one.
     const sameKey = apiKey === c.ai.gemini?.apiKey;
-    const chk = await checkGeminiKey(apiKey, { model: body.model || (sameKey ? c.ai.gemini?.model : "") });
+    const named = body.model || (sameKey && c.ai.gemini?.pinned ? c.ai.gemini.model : "");
+    const chk = await checkGeminiKey(apiKey, { model: named });
     if (!chk.ok) return chk;
     updateConfig((x) => {
       x.ai.mode = "gemini";
-      x.ai.gemini = { apiKey, model: chk.model, titleModel: chk.titleModel };
+      x.ai.gemini = { apiKey, model: chk.model, titleModel: chk.titleModel, ...(chk.pinned ? { pinned: true } : {}) };
     });
     return { ok: true, ai: publicAI() };
   }

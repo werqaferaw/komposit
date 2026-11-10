@@ -171,6 +171,10 @@ test("a turn the page runs is recorded like any other", async () => {
     history: { from: 0, messages: history },
   });
   assert.equal(r.status, 200, r.text);
+  // The page gets the same normalized events a turn run here streams.
+  assert.deepEqual(r.json.events.map((e) => e.type), ["note", "step", "step_done"]);
+  assert.equal(r.json.events[1].label, "Make the title red");
+  assert.match(r.json.events[2].imageUrl, new RegExp(`^/api/chats/${chatId}/img/render-`));
   const tail = [
     { role: "user", content: [{ type: "tool_result", tool_use_id: "call_1", content: "edit applied." }] },
     { role: "assistant", content: [{ type: "text", text: "The title is red now." }] },
@@ -178,6 +182,7 @@ test("a turn the page runs is recorded like any other", async () => {
   r = await api("/api/turn/record", { chatId, turnId, events: [{ type: "final", text: "The title is red now." }, { type: "timing", modelMs: 1234 }], history: { from: 2, messages: tail }, end: { status: "done" } });
   assert.equal(r.status, 200);
   assert.equal(r.json.status, "done");
+  assert.deepEqual(r.json.events.map((e) => e.type), ["final", "done"]);
 
   const chat = JSON.parse(readFileSync(join(dataDir, "chats", chatId, "chat.json"), "utf8"));
   const turn = chat.turns[0];

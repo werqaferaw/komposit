@@ -437,9 +437,9 @@ function aiChooser(box, setup, { saveLabel = "Save", onSaved } = {}) {
     if (id === "gemini") {
       const g = ai.gemini || {};
       const saved = g.hasKey ? `<div class="muted">Saved key: <kbd>${esc(g.keyHint)}</kbd>${g.model ? `, using <kbd>${esc(g.model)}</kbd>` : ""}. Paste a new one to replace it.</div>` : "";
-      return `<input class="field mono" type="password" id="f-gkey" placeholder="AIza..." autocomplete="off" spellcheck="false" />${saved}
+      return `<input class="field mono" type="password" id="f-gkey" placeholder="Gemini API key" autocomplete="off" spellcheck="false" />${saved}
         <input class="field mono" id="f-gmodel" placeholder="Model (optional; the best one your key can use)" value="" autocomplete="off" spellcheck="false" />
-        <div class="muted">Create a key at aistudio.google.com under Get API key.</div>`;
+        <div class="muted">Create a key at aistudio.google.com under Get API key. Pro-class models need billing turned on there; without it, Komposit uses the best model your key can.</div>`;
     }
     if (id === "openai") {
       const cur = ai.openai || {};
