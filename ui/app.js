@@ -474,7 +474,7 @@ async function obFirst() {
     await postJSON("/api/setup/done", { done: true }).catch(() => {});
     S.status.onboarded = true;
     ungate(); loadChats(); await loadWorkspace();
-    if (idea) { S.ctrl.app = idea.app; reflectAll(); const ta = $("#composer-start textarea"); ta.value = idea.text; ta.focus(); }
+    if (idea) { chooseApp(idea.app); const ta = $("#composer-start textarea"); ta.value = idea.text; ta.focus(); }
   };
   $$(".suggest button", g).forEach((b) => (b.onclick = () => finish(ideas[+b.dataset.n])));
   $("#ob-back", g).onclick = () => obApps();
@@ -807,7 +807,7 @@ function wireComposer(root) {
   root.innerHTML = composerHTML();
   const ta = $("textarea", root);
   reflect(root);
-  $$(".apps button", root).forEach((b) => b.addEventListener("click", () => { S.ctrl.app = b.dataset.app; reflectAll(); }));
+  $$(".apps button", root).forEach((b) => b.addEventListener("click", () => chooseApp(b.dataset.app)));
   $(".effort input", root).addEventListener("input", (e) => { S.ctrl.effort = EFFORTS[+e.target.value] || "medium"; store.set("effort", S.ctrl.effort); reflectAll(); });
   $(".send", root).addEventListener("click", () => (S.running ? stopTurn() : send(root)));
   ta.addEventListener("keydown", (e) => {
@@ -933,6 +933,10 @@ function reflect(root) {
   const ef = $(".effort input", root);
   if (ef) { const i = Math.max(0, EFFORTS.indexOf(S.ctrl.effort)); ef.value = i; ef.style.setProperty("--p", i / 2); $(".effort-val", root).textContent = EFFORT[S.ctrl.effort] || "Balanced"; }
 }
+// The app the next message goes to. A choice (the person's, an open file's or a
+// chat's) is final: the workspace's first guess (the first running app) only
+// fills in when nothing has chosen yet, even if its answer arrives later.
+function chooseApp(app) { S.ctrl.app = app; S.appAutoSet = true; reflectAll(); }
 function reflectAll() { [$("#composer-start"), $("#composer-dock")].forEach((r) => r && reflect(r)); }
 function setSendButtons(running) {
   $$(".send").forEach((b) => { b.innerHTML = ic(running ? "stop" : "send"); b.classList.toggle("stop", running); b.title = running ? "Stop" : "Send (Enter)"; });
@@ -993,7 +997,7 @@ async function browseDir(dir) {
 }
 
 async function openFile(f) {
-  S.ctrl.app = f.app; reflectAll();
+  chooseApp(f.app);
   const ta = S.cur ? $("#composer-dock textarea") : $("#composer-start textarea");
   if (ta && !ta.value.trim()) { ta.value = `In "${f.name}": `; ta.focus(); }
   try { await postJSON("/api/open", { path: f.path, app: f.app }); } catch {}
@@ -1029,7 +1033,7 @@ async function createNewDoc() {
     const r = await postJSON("/api/new", { app, opts: { width, height } });
     if (!r.ok) { $("#m-err").textContent = r.error || "Couldn't create the document."; return; }
     $("#newdoc").classList.remove("on");
-    S.ctrl.app = app; reflectAll();
+    chooseApp(app);
     const ta = S.cur ? $("#composer-dock textarea") : $("#composer-start textarea");
     if (ta) ta.focus();
   } catch (e) { $("#m-err").textContent = e.message; }
@@ -1087,7 +1091,7 @@ async function openChat(id) {
     const v = turnView(storedToVM(id, t));
     tr.append(v.userEl, v.turnEl);
   }
-  if (d.chat.turns.length) { const last = d.chat.turns[d.chat.turns.length - 1]; S.ctrl.app = last.app || S.ctrl.app; reflectAll(); }
+  if (d.chat.turns.length) { const last = d.chat.turns[d.chat.turns.length - 1]; if (last.app) chooseApp(last.app); }
   renderHistory();
   scrollEnd(true);
   if (d.running && !(S.running && S.running.chatId === id)) pollChat(id);

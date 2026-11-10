@@ -32,7 +32,9 @@ export async function executeTool(bridge, name, input = {}) {
     }
     if (name === "render") {
       const r = await bridge.render(input);
-      const text = `Rendered (${r.note}).${r.video ? `\nPreview video: ${r.video}` : ""}`;
+      // The video plays in the chat (the app moves it there by this path); the
+      // path itself is a temporary file the person never needs to see.
+      const text = `Rendered (${r.note}).${r.video ? `\nPreview video: ${r.video}\nIt plays in the chat for the user; don't mention this temporary path.` : ""}`;
       const meta = { display: r.video ? `rendered a preview video ${r.video}` : "rendered to check", image: r.image, ...(r.video ? { video: r.video } : {}) };
       if (r.images && r.images.length > 1) {
         const content = [{ type: "text", text }];

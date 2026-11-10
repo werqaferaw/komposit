@@ -21,14 +21,21 @@ Komposit lets an AI work directly in your open **Illustrator**, **Photoshop** an
 live document and your selection, writes and runs its own ExtendScript, renders
 the result so it can see its work, checks it, and tells you what it did.
 
+<p align="center">
+  <img src="docs/media/chat.webp" alt="A Komposit chat: a request in Illustrator, the steps it took with their times, and the poster after the edit" width="49%">
+  <img src="docs/media/settings.webp" alt="Komposit Settings: the choice of AI and the Adobe apps it can work in" width="49%">
+</p>
+<p align="center"><sub>Real sessions. Watch one, or click through a recording, on <a href="https://komposit.werq.dev">the website</a>.</sub></p>
+
 - **Live, not generated.** It edits your real file: layers, artboards, type,
   keyframes. Every change is in the app's undo history, and it saves only when
   you ask.
 - **It looks before it answers.** After an edit it renders the document and
   checks the result against what you asked for.
-- **Your AI, your keys.** Use your Claude plan through Claude Code, an Anthropic
-  API key, a Google Gemini API key, or any OpenAI-compatible provider
-  (OpenRouter, OpenAI, a local model). Keys stay on your computer.
+- **Your AI, your keys.** Use your Claude plan through Claude Code, your ChatGPT
+  plan through Codex, an Anthropic or Google Gemini API key, or any
+  OpenAI-compatible provider (OpenRouter, OpenAI, a local model). Keys stay with
+  you: on your computer, or in your browser when you use the web page.
 - **Point by selecting.** Select something in the app and say "make this
   bigger" or "match these".
 - **Exports.** PNG, print-ready PDF (Illustrator) and MP4 (After Effects), written
