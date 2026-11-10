@@ -1,8 +1,11 @@
-# komposit-gateway: invite-gated proxy in front of the Anthropic Messages API.
-# Setup, invites and deploy steps are in README.md.
+# komposit-gateway: invite-gated proxy in front of the Anthropic Messages API,
+# with optional Google sign-in for accounts the owner grants an allowance.
+# Setup, invites, sign-in and deploy steps are in README.md.
 #
-# Nothing in this file is secret. The Anthropic key is a Worker secret, never a var:
+# Nothing in this file is secret. The Anthropic key and the Google client secret
+# are Worker secrets, never vars:
 #   npx wrangler secret put ANTHROPIC_API_KEY
+#   npx wrangler secret put GOOGLE_CLIENT_SECRET
 
 name = "komposit-gateway"
 main = "src/index.js"
@@ -27,15 +30,28 @@ custom_domain = true
 #   {"name": "...", "disabled"?: true, "dailyRequests"?: n, "monthlyOutputTokens"?: n, "models"?: [...]}
 [[kv_namespaces]]
 binding = "INVITES"
-# TODO before deploying: run `npx wrangler kv namespace create INVITES` and paste the id it prints.
+# TODO before deploying: setup.sh writes the id here (or run
+# `npx wrangler kv namespace create komposit-gateway-INVITES` and paste the id it prints).
 id = "TODO-replace-with-INVITES-namespace-id"
 
 # Usage counters: req:<hash>:<YYYY-MM-DD> (requests that UTC day),
-# tok:<hash>:<YYYY-MM> (token totals that UTC month).
+# tok:<hash>:<YYYY-MM> (token totals that UTC month). Signed-in accounts use
+# req:user:<id>:<YYYY-MM-DD> and tok:user:<id>:<YYYY-MM>.
 [[kv_namespaces]]
 binding = "USAGE"
-# TODO before deploying: run `npx wrangler kv namespace create USAGE` and paste the id it prints.
+# TODO before deploying: setup.sh writes the id here (or run
+# `npx wrangler kv namespace create komposit-gateway-USAGE` and paste the id it prints).
 id = "TODO-replace-with-USAGE-namespace-id"
+
+# Accounts for the optional Google sign-in: users, sessions, one-time OAuth
+# state (schema in migrations/). Invites keep working without it.
+[[d1_databases]]
+binding = "DB"
+database_name = "komposit-gateway"
+# TODO before deploying: setup.sh creates the database and writes its id here
+# (or run `npx wrangler d1 create komposit-gateway` and paste the database_id).
+database_id = "TODO-replace-with-D1-database-id"
+migrations_dir = "migrations"
 
 [vars]
 # Where requests are forwarded. Only the tests point this somewhere else.
@@ -45,8 +61,29 @@ ALLOWED_MODELS = "claude-opus-5-5,claude-sonnet-5-5,claude-haiku-5-5"
 # Requests asking for more output than this are clamped down to it.
 MAX_TOKENS_CAP = "64000"
 # Per-invite defaults; an invite record can override either one.
+# Signed-in accounts get DEFAULT_DAILY_REQUESTS too; their monthly output-token
+# limit is their own allowance (scripts/grant.mjs).
 DEFAULT_DAILY_REQUESTS = "300"
 DEFAULT_MONTHLY_OUTPUT_TOKENS = "2000000"
+
+# --- Optional sign-in with Google -------------------------------------------
+# The OAuth client id from Google Cloud (public, not a secret; a "Web
+# application" client whose redirect URI is
+# https://gateway.komposit.werq.dev/auth/google/callback). For your own
+# deployment, use your own client id. Until both this and the secret are set,
+# sign-in stays off: /auth/google/start sends people back with
+# #ks_error=unavailable and /health reports "signIn": false. A value starting
+# with "TODO" counts as not set. Everything else works without sign-in.
+# The client secret is a Worker secret, never a var:
+#   npx wrangler secret put GOOGLE_CLIENT_SECRET
+GOOGLE_CLIENT_ID = "17149068649-86744nhunu81327o7nh9autnmb5etqvv.apps.googleusercontent.com"
+# Web pages that may start a sign-in (and receive the session) and call the
+# gateway from a browser (CORS). Comma-separated origins. The app's own local
+# page, http://127.0.0.1:4321-4330 and http://localhost:4321-4330, is always allowed.
+RETURN_ORIGINS = "https://app.komposit.werq.dev"
+# Google's endpoints. Only the tests point these elsewhere.
+GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 
 # Workers Logs: keeps the gateway's one-line JSON logs (invite name, model, status,
 # token counts; never bodies or keys) for a few days in the dashboard. Cloudflare

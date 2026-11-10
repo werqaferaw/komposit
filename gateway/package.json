@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Invite-gated Cloudflare Worker that proxies the Anthropic Messages API with the owner's key.",
+  "description": "Invite-gated Cloudflare Worker, with optional Google sign-in, that proxies the Anthropic Messages API with the owner's key.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -14,9 +14,10 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "wrangler dev --local",
+    "dev": "wrangler d1 migrations apply DB --local && wrangler dev --local --port 8787 --local-upstream localhost:8787",
     "test": "node --test --test-reporter=spec test/gateway.test.mjs",
-    "mint": "node scripts/mint-invite.mjs"
+    "mint": "node scripts/mint-invite.mjs",
+    "grant": "node scripts/grant.mjs"
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "1.3.0",

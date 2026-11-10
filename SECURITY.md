@@ -60,11 +60,21 @@ itself: `POST /api/tool` (one tool call in an Adobe app) and
   screenshots of your work.
 
 API keys you enter in the app (the local page, or a custom service address)
-stay on your computer, in Komposit's settings file (mode 0600 on macOS). The invite gateway (`gateway/`) holds the owner's
-Anthropic key server-side; invite codes are stored only as SHA-256 hashes.
+stay on your computer, in Komposit's settings file (mode 0600 on macOS). The
+invite gateway (`gateway/`) holds the owner's Anthropic key server-side; invite
+codes and sign-in sessions are stored only as SHA-256 hashes.
+
+Signing in with Google is optional. It uses the OAuth authorization code flow
+with PKCE, a single-use state tied to the browser that started it, and a nonce.
+It stores only Google's id for the account, a verified email, the name and the
+allowance, and you can delete the account yourself
+([docs/privacy.md](docs/privacy.md)). The gateway answers browser calls (CORS)
+only from the hosted UI and the app's local page; server-to-server calls carry
+no Origin and are unaffected. The hosted page keeps the sign-in session in that
+browser, like a key.
 
 ## In scope
 
 The local server and its locks (including the bridge API the hosted page
 uses), the MCP tool server, the hosted UI and its agent loop (`web/`), the
-invite gateway (`gateway/`), and the Mac and Windows apps.
+gateway (`gateway/`) and its sign-in, and the Mac and Windows apps.

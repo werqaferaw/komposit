@@ -41,12 +41,18 @@ locally, and people can bring their own AI.
   files at `app.komposit.werq.dev`; the local server only trusts the origins
   listed in `companion/auth.mjs` (plus any you add with `KOMPOSIT_WEB_ORIGINS`).
 - **Invite gateway** (`gateway/`): `gateway/setup.sh` creates the KV
-  namespaces, stores the Anthropic key as a secret, deploys and checks it. Use a
-  dedicated key with a monthly spend limit; that limit is the hard ceiling.
-  Invites:
+  namespaces and the D1 database (applying its migrations), stores the Anthropic
+  key and the Google client secret as secrets, deploys and checks it. Without a
+  terminal, run `GATEWAY_ANTHROPIC_API_KEY=... GOOGLE_CLIENT_SECRET=... gateway/setup.sh --yes`.
+  Use a dedicated key with a monthly spend limit; that limit is the hard ceiling.
+  When a release adds a file to `gateway/migrations/`, run
+  `npx wrangler d1 migrations apply DB --remote` (from `gateway/`) before deploying.
+  Invites and account allowances:
   ```bash
   cd gateway
   node scripts/mint-invite.mjs "Name" [--daily 300] [--monthly-output 2000000]
   node scripts/mint-invite.mjs revoke <code>
+  node scripts/grant.mjs someone@example.com 2m      # signed-in account, no code
+  node scripts/grant.mjs revoke someone@example.com
   ```
-  See [gateway/README.md](../gateway/README.md) for limits and the Workers plan.
+  See [gateway/README.md](../gateway/README.md) for limits, sign-in and the Workers plan.

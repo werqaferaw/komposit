@@ -1,26 +1,49 @@
 /**
- * komposit-gateway: lets invited Komposit testers use the owner's Anthropic API
- * key without the key ever leaving this Worker.
+ * komposit-gateway: lets invited Komposit testers, and signed-in people the
+ * owner has granted an allowance, use the owner's Anthropic API key without
+ * the key ever leaving this Worker.
  *
- * Testers point the official Anthropic SDK at the gateway and use an invite code
- * as their API key:
+ * Clients point the official Anthropic SDK at the gateway and use an invite
+ * code, or the session of a signed-in account, as their API key:
  *
- *   new Anthropic({ baseURL: "https://gateway.komposit.werq.dev", apiKey: "kp_..." })
+ *   new Anthropic({ baseURL: "https://gateway.komposit.werq.dev", apiKey: "kp_..." })  // invite
+ *   new Anthropic({ baseURL: "https://gateway.komposit.werq.dev", apiKey: "ks_...",     // session, from
+ *                   dangerouslyAllowBrowser: true })                                     // the web page
  *
  * Routes
- *   POST /v1/messages  check the invite and its limits, forward to Anthropic with
- *                      the owner key, stream the response back, meter token usage
- *   GET  /v1/me        { name, limits, usage } for the calling invite
- *   GET  /health       liveness and configuration check
+ *   POST   /v1/messages           check the credential and its limits, forward to Anthropic with
+ *                                 the owner key, stream the response back, meter token usage
+ *   GET    /v1/me                 { kind, name, limits, usage, ... } for the calling invite or account
+ *   DELETE /v1/me                 delete the calling account, its sessions and its usage (sessions only)
+ *   GET    /auth/google/start     sign in with Google (accounts.js)
+ *   GET    /auth/google/callback
+ *   POST   /auth/logout           end the calling session
+ *   GET    /health                liveness and configuration check
+ * Pages on an allowed origin may call /v1/messages, /v1/me and /auth/logout from a browser (cors.js).
  *
- * Storage (Workers KV, soft limits: KV is eventually consistent)
- *   INVITES  inv:<sha256 hex of code>  {"name", "disabled"?, "dailyRequests"?, "monthlyOutputTokens"?, "models"?}
- *   USAGE    req:<hash>:<YYYY-MM-DD>   requests counted that UTC day
- *            tok:<hash>:<YYYY-MM>      {"output_tokens", "input_tokens", "cache_creation_input_tokens",
- *                                       "cache_read_input_tokens", "updated_at"} for that UTC month
+ * Storage
+ *   KV INVITES  inv:<sha256 hex of code>  {"name", "disabled"?, "dailyRequests"?, "monthlyOutputTokens"?, "models"?}
+ *   KV USAGE    req:<meter>:<YYYY-MM-DD>  requests counted that UTC day
+ *               tok:<meter>:<YYYY-MM>     {"output_tokens", "input_tokens", "cache_creation_input_tokens",
+ *                                          "cache_read_input_tokens", "updated_at"} for that UTC month
+ *               <meter> is the invite's hash, or "user:<id>" for an account (never a valid hash)
+ *   D1 DB       users, sessions, oauth_states (migrations/, accounts.js)
+ * The limits are soft: KV is eventually consistent.
  *
- * Never logs request or response bodies, invite codes, or keys.
+ * Never logs request or response bodies, invite codes, session tokens, OAuth
+ * codes, emails, or keys.
  */
+import {
+  SESSION_PREFIX,
+  authenticateSession,
+  deleteAccountRecords,
+  handleGoogleCallback,
+  handleGoogleStart,
+  handleLogout,
+  signInConfig,
+} from "./accounts.js";
+import { CORS_ROUTES, preflight, withCors } from "./cors.js";
+import { apiError, errorSummary, json, log, nonNegativeInt, parseJson, sha256Hex, splitList } from "./util.js";
 
 const DEFAULTS = {
   UPSTREAM_BASE: "https://api.anthropic.com",
@@ -46,68 +69,94 @@ const USAGE_FIELDS = ["input_tokens", "output_tokens", "cache_creation_input_tok
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    const corsMethods = CORS_ROUTES[url.pathname];
+    let response;
     try {
-      switch (`${request.method} ${url.pathname}`) {
-        case "POST /v1/messages":
-          return await handleMessages(request, env, ctx, url);
-        case "GET /v1/me":
-          return await handleMe(request, env);
-        case "GET /health":
-          return handleHealth(env);
-        default:
-          return apiError(404, "not_found_error", "Not found");
-      }
+      response = await route(request, env, ctx, url, corsMethods);
     } catch (err) {
       log("error", { evt: "unhandled", path: url.pathname, error: errorSummary(err) });
-      return apiError(500, "api_error", "Internal gateway error");
+      response = apiError(500, "api_error", "Internal gateway error");
     }
+    // Errors too: a browser can read a 401 or 429 only if it carries the CORS headers.
+    return corsMethods && request.method !== "OPTIONS" ? withCors(response, request, env) : response;
   },
 };
+
+async function route(request, env, ctx, url, corsMethods) {
+  // A CORS preflight from an allowed origin; anything else that says OPTIONS is a 404, as before.
+  if (request.method === "OPTIONS" && corsMethods) return preflight(request, env, corsMethods) ?? notFound();
+  switch (`${request.method} ${url.pathname}`) {
+    case "POST /v1/messages":
+      return handleMessages(request, env, ctx, url);
+    case "GET /v1/me":
+      return handleMe(request, env, ctx);
+    case "DELETE /v1/me":
+      return handleDeleteMe(request, env, ctx);
+    case "GET /auth/google/start":
+      return handleGoogleStart(request, env, ctx, url);
+    case "GET /auth/google/callback":
+      return handleGoogleCallback(request, env, ctx, url);
+    case "POST /auth/logout":
+      return handleLogout(credentialFrom(request.headers), env);
+    case "GET /health":
+      return handleHealth(env);
+    default:
+      return notFound();
+  }
+}
+
+function notFound() {
+  return apiError(404, "not_found_error", "Not found");
+}
 
 // ---------------------------------------------------------------------------
 // POST /v1/messages
 
 async function handleMessages(request, env, ctx, url) {
   const started = Date.now();
-  const auth = await authenticate(request, env);
+  const auth = await authenticate(request, env, ctx);
   if (auth.error) return auth.error;
-  const { hash, invite } = auth;
-  const name = inviteName(invite);
+  const { limits, meter, label } = auth;
+  const who = auth.kind === "account" ? "This account's" : "This invite's";
+
+  if (auth.kind === "account" && limits.monthlyOutputTokens === 0) {
+    log("warn", { evt: "rejected", reason: "no_allowance", ...label });
+    return apiError(403, "permission_error", "This account has no Komposit allowance yet.");
+  }
 
   if (!env.ANTHROPIC_API_KEY) {
     log("error", { evt: "misconfigured", missing: "ANTHROPIC_API_KEY" });
     return apiError(500, "api_error", "The gateway is not configured yet");
   }
 
-  const limits = resolveLimits(invite, env);
   const period = currentPeriod();
-  const requestsKey = `req:${hash}:${period.day}`;
-  const tokensKey = `tok:${hash}:${period.month}`;
+  const requestsKey = `req:${meter}:${period.day}`;
+  const tokensKey = `tok:${meter}:${period.month}`;
   const [requestsToday, monthUsage] = await Promise.all([
     readCount(env.USAGE, requestsKey),
     readUsage(env.USAGE, tokensKey),
   ]);
 
-  // The messages name the invite and the limit: the Komposit app shows a 429's
-  // message to the person only when it mentions one of those words.
+  // The messages name the invite or account and the limit: the Komposit app
+  // shows a 429's message to the person only when it mentions one of those words.
   if (requestsToday >= limits.dailyRequests) {
-    log("warn", { evt: "rejected", reason: "daily_requests", invite: name });
+    log("warn", { evt: "rejected", reason: "daily_requests", ...label });
     return limitError(
-      `This invite's daily request limit is used up (${formatInt(limits.dailyRequests)} requests per day). It resets at 00:00 UTC.`,
+      `${who} daily request limit is used up (${formatInt(limits.dailyRequests)} requests per day). It resets at 00:00 UTC.`,
       period.dayResetsAt,
     );
   }
   if (monthUsage.output_tokens >= limits.monthlyOutputTokens) {
-    log("warn", { evt: "rejected", reason: "monthly_output_tokens", invite: name });
+    log("warn", { evt: "rejected", reason: "monthly_output_tokens", ...label });
     return limitError(
-      `This invite's monthly output token limit is used up (${formatInt(limits.monthlyOutputTokens)} tokens). It resets on the 1st of the month, UTC.`,
+      `${who} monthly output token limit is used up (${formatInt(limits.monthlyOutputTokens)} tokens). It resets on the 1st of the month, UTC.`,
       period.monthResetsAt,
     );
   }
 
   const parsed = await readMessagesBody(request, limits);
   if (parsed.error) {
-    log("warn", { evt: "rejected", reason: parsed.reason, invite: name });
+    log("warn", { evt: "rejected", reason: parsed.reason, ...label });
     return parsed.error;
   }
   const { body, forwardBody, clamped } = parsed;
@@ -117,7 +166,7 @@ async function handleMessages(request, env, ctx, url) {
     kvUpdate(env.USAGE, requestsKey, (stored) => toCount(stored) + 1, {
       ttl: DAY_COUNTER_TTL,
       current: requestsToday,
-      label: { kind: "requests", invite: name },
+      label: { kind: "requests", ...label },
     }),
   );
 
@@ -129,14 +178,14 @@ async function handleMessages(request, env, ctx, url) {
       body: forwardBody,
     });
   } catch (err) {
-    log("error", { evt: "upstream_unreachable", invite: name, error: errorSummary(err) });
+    log("error", { evt: "upstream_unreachable", ...label, error: errorSummary(err) });
     return apiError(502, "api_error", "Could not reach the model provider. Try again shortly.");
   }
 
   const headers = pickHeaders(upstream.headers, PASSTHROUGH_RESPONSE_HEADERS);
   const summary = {
     evt: "messages",
-    invite: name,
+    ...label,
     model: body.model,
     stream: body.stream === true,
     status: upstream.status,
@@ -162,7 +211,7 @@ async function handleMessages(request, env, ctx, url) {
         cache_read_input_tokens: usage.cache_read_input_tokens,
         ...(streamError ? { stream_error: streamError } : {}),
       });
-      await recordTokens(env.USAGE, tokensKey, usage, name);
+      await recordTokens(env.USAGE, tokensKey, usage, label);
     }),
   );
   return new Response(metered.body, { status: upstream.status, headers });
@@ -415,7 +464,7 @@ function isCount(value) {
   return Number.isFinite(value) && value >= 0;
 }
 
-async function recordTokens(kv, key, usage, invite) {
+async function recordTokens(kv, key, usage, label) {
   if (!USAGE_FIELDS.some((field) => usage[field] > 0)) return;
   await kvUpdate(
     kv,
@@ -425,37 +474,105 @@ async function recordTokens(kv, key, usage, invite) {
       for (const field of USAGE_FIELDS) total[field] += usage[field];
       return { ...total, updated_at: new Date().toISOString() };
     },
-    { ttl: MONTH_COUNTER_TTL, label: { kind: "tokens", invite } },
+    { ttl: MONTH_COUNTER_TTL, label: { kind: "tokens", ...label } },
   );
 }
 
 // ---------------------------------------------------------------------------
-// GET /v1/me and GET /health
+// GET /v1/me, DELETE /v1/me and GET /health
 
-async function handleMe(request, env) {
-  const auth = await authenticate(request, env);
+async function handleMe(request, env, ctx) {
+  const auth = await authenticate(request, env, ctx);
   if (auth.error) return auth.error;
-  const limits = resolveLimits(auth.invite, env);
+  const usage = await usageReport(env.USAGE, auth.meter);
+  const headers = { "cache-control": "no-store" };
+  if (auth.kind === "account") {
+    const { account } = auth;
+    return json(
+      {
+        kind: "account",
+        name: account.name,
+        email: account.email,
+        allowance: account.allowance,
+        limits: auth.limits,
+        usage,
+        sessionExpiresAt: account.sessionExpiresAt,
+      },
+      200,
+      headers,
+    );
+  }
+  return json(
+    { kind: "invite", name: typeof auth.invite.name === "string" ? auth.invite.name : null, limits: auth.limits, usage },
+    200,
+    headers,
+  );
+}
+
+async function usageReport(kv, meter) {
   const period = currentPeriod();
   const [requests, usage] = await Promise.all([
-    readCount(env.USAGE, `req:${auth.hash}:${period.day}`),
-    readUsage(env.USAGE, `tok:${auth.hash}:${period.month}`),
+    readCount(kv, `req:${meter}:${period.day}`),
+    readUsage(kv, `tok:${meter}:${period.month}`),
   ]);
-  return json({
-    name: typeof auth.invite.name === "string" ? auth.invite.name : null,
-    limits,
-    usage: {
-      today: { date: period.day, requests, resetsAt: period.dayResetsAt.toISOString() },
-      thisMonth: {
-        month: period.month,
-        outputTokens: usage.output_tokens,
-        inputTokens: usage.input_tokens,
-        cacheCreationInputTokens: usage.cache_creation_input_tokens,
-        cacheReadInputTokens: usage.cache_read_input_tokens,
-        resetsAt: period.monthResetsAt.toISOString(),
-      },
+  return {
+    today: { date: period.day, requests, resetsAt: period.dayResetsAt.toISOString() },
+    thisMonth: {
+      month: period.month,
+      outputTokens: usage.output_tokens,
+      inputTokens: usage.input_tokens,
+      cacheCreationInputTokens: usage.cache_creation_input_tokens,
+      cacheReadInputTokens: usage.cache_read_input_tokens,
+      resetsAt: period.monthResetsAt.toISOString(),
     },
-  });
+  };
+}
+
+/** Self-service deletion: the account, all its sessions, and its usage counters. */
+async function handleDeleteMe(request, env, ctx) {
+  const auth = await authenticate(request, env, ctx);
+  if (auth.error) return auth.error;
+  if (auth.kind !== "account") {
+    log("warn", { evt: "rejected", reason: "delete_needs_account", ...auth.label });
+    return apiError(
+      403,
+      "permission_error",
+      "Only a signed-in account can be deleted here. An invite code is removed by the person who gave it to you.",
+    );
+  }
+  try {
+    await deleteAccountRecords(env.DB, auth.account.id);
+  } catch (err) {
+    log("error", { evt: "d1_failed", step: "delete_account", error: errorSummary(err) });
+    return apiError(503, "api_error", "The account could not be deleted right now. Try again in a minute.");
+  }
+  await deleteUsage(env.USAGE, auth.meter);
+  log("info", { evt: "account_deleted", ...auth.label });
+  return new Response(null, { status: 204 });
+}
+
+/** Delete every usage counter of a meter. Failures are logged: the account itself is already gone. */
+async function deleteUsage(kv, meter) {
+  // The current counters by name, because KV may not list a key written moments ago.
+  const period = currentPeriod();
+  const names = new Set([`req:${meter}:${period.day}`, `tok:${meter}:${period.month}`]);
+  try {
+    for (const prefix of [`req:${meter}:`, `tok:${meter}:`]) {
+      let cursor;
+      do {
+        const page = await kv.list({ prefix, cursor });
+        for (const key of page.keys) names.add(key.name);
+        cursor = page.list_complete ? undefined : page.cursor;
+      } while (cursor);
+    }
+  } catch (err) {
+    log("error", { evt: "kv_list_failed", store: "USAGE", error: errorSummary(err) });
+  }
+  await Promise.all(
+    [...names].map((name) =>
+      kv.delete(name).catch((err) => log("error", { evt: "kv_delete_failed", store: "USAGE", error: errorSummary(err) })),
+    ),
+  );
 }
 
 function handleHealth(env) {
@@ -463,14 +580,47 @@ function handleHealth(env) {
   if (!env.ANTHROPIC_API_KEY) missing.push("ANTHROPIC_API_KEY");
   if (!env.INVITES) missing.push("INVITES");
   if (!env.USAGE) missing.push("USAGE");
-  return missing.length ? json({ ok: false, missing }, 503) : json({ ok: true });
+  // Sign-in is optional, so it never makes the gateway unhealthy; it is only reported.
+  const signIn = signInConfig(env);
+  return json(
+    {
+      ok: missing.length === 0,
+      ...(missing.length ? { missing } : {}),
+      signIn: signIn.ready,
+      ...(signIn.ready ? {} : { signInMissing: signIn.missing }),
+    },
+    missing.length ? 503 : 200,
+  );
 }
 
 // ---------------------------------------------------------------------------
-// Invites and limits
+// Credentials and limits
 
-async function authenticate(request, env) {
-  const code = inviteCodeFrom(request.headers);
+/**
+ * Who is calling: an invite (kp_..., KV) or a signed-in account (ks_..., D1).
+ * Returns { kind, meter, label, limits, invite | account }, or { error } (a Response).
+ * `meter` names the USAGE counters; `label` is what the logs may say about the caller.
+ */
+async function authenticate(request, env, ctx) {
+  const credential = credentialFrom(request.headers);
+  if (credential?.startsWith(SESSION_PREFIX)) {
+    const session = await authenticateSession(credential, env, ctx);
+    if (session.error) return session;
+    const { account } = session;
+    return {
+      kind: "account",
+      account,
+      // "user:" can never collide with an invite's meter, which is 64 hex characters.
+      meter: `user:${account.id}`,
+      // The account id only: names and emails stay out of the logs.
+      label: { account: account.id },
+      limits: accountLimits(account, env),
+    };
+  }
+  return authenticateInvite(credential, env);
+}
+
+async function authenticateInvite(code, env) {
   if (!code) {
     log("warn", { evt: "auth_failed", reason: "missing" });
     return { error: authError() };
@@ -498,11 +648,15 @@ async function authenticate(request, env) {
     log("warn", { evt: "auth_failed", reason: "disabled", invite: inviteName(invite) });
     return { error: authError() };
   }
-  return { hash, invite };
+  // The invite's name is the owner's own label for it, so it may be logged.
+  return { kind: "invite", invite, meter: hash, label: { invite: inviteName(invite) }, limits: resolveLimits(invite, env) };
 }
 
-/** The invite code from x-api-key, or from `Authorization: Bearer` (what SDK 1.x sends). */
-function inviteCodeFrom(headers) {
+/**
+ * The credential from x-api-key, or from `Authorization: Bearer` (what SDK 1.x
+ * sends): an invite code (kp_...) or a session token (ks_...).
+ */
+function credentialFrom(headers) {
   let code = headers.get("x-api-key");
   if (!code) {
     const match = /^Bearer\s+(.+)$/i.exec(headers.get("authorization") || "");
@@ -518,6 +672,19 @@ function authError() {
 
 function inviteName(invite) {
   return typeof invite.name === "string" && invite.name ? invite.name.slice(0, 80) : "(unnamed)";
+}
+
+/**
+ * A signed-in account's limits: its own allowance is the monthly output-token
+ * limit; requests per day, max_tokens and models are the gateway defaults.
+ */
+function accountLimits(account, env) {
+  return {
+    dailyRequests: nonNegativeInt(env.DEFAULT_DAILY_REQUESTS) ?? DEFAULTS.DEFAULT_DAILY_REQUESTS,
+    monthlyOutputTokens: account.allowance,
+    maxTokens: nonNegativeInt(env.MAX_TOKENS_CAP) ?? DEFAULTS.MAX_TOKENS_CAP,
+    models: splitList(env.ALLOWED_MODELS ?? DEFAULTS.ALLOWED_MODELS),
+  };
 }
 
 /** Per-invite values win; otherwise the Worker vars; otherwise the built-in defaults. */
@@ -597,33 +764,7 @@ async function kvUpdate(kv, key, update, { ttl, current, label }) {
 }
 
 // ---------------------------------------------------------------------------
-// Small utilities
-
-async function sha256Hex(text) {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
-  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-function parseJson(text) {
-  if (text === null || text === undefined) return null;
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-}
-
-function nonNegativeInt(value) {
-  const n = typeof value === "string" && value.trim() !== "" ? Number(value) : value;
-  return Number.isSafeInteger(n) && n >= 0 ? n : undefined;
-}
-
-function splitList(value) {
-  return String(value)
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
+// Small utilities (the shared ones are in util.js)
 
 function pickHeaders(source, names) {
   const headers = new Headers();
@@ -636,27 +777,4 @@ function pickHeaders(source, names) {
 
 function formatInt(n) {
   return n.toLocaleString("en-US");
-}
-
-function json(data, status = 200, extraHeaders = {}) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { "content-type": "application/json", ...extraHeaders },
-  });
-}
-
-/** Errors in the Anthropic API's shape, so the SDK maps them to its typed error classes. */
-function apiError(status, type, message, extraHeaders) {
-  return json({ type: "error", error: { type, message } }, status, extraHeaders);
-}
-
-function errorSummary(err) {
-  return `${err?.name || "Error"}: ${String(err?.message ?? err).slice(0, 200)}`;
-}
-
-function log(level, entry) {
-  const line = JSON.stringify(entry);
-  if (level === "error") console.error(line);
-  else if (level === "warn") console.warn(line);
-  else console.log(line);
 }
