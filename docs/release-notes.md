@@ -23,7 +23,7 @@ Both need Illustrator, Photoshop or After Effects, and one of: a Claude Pro or M
 - Exports PNG, JPG, SVG and print-ready PDF (Illustrator), PNG and JPG (Photoshop), frames and MP4 (After Effects), into `Komposit Exports` in your home folder. It never overwrites a file.
 - After Effects: a short preview video of the animation, right in the chat.
 - Attach any file (images, PDFs, logos, briefs) or talk instead of typing.
-- Use it from the app's own page, or from the web page at app.komposit.werq.dev in Chrome, Edge, Arc, Brave or Firefox. On the web page, an API key you paste stays in your browser, and requests go from there straight to the AI service you chose; the app on your computer does the work in your documents.
+- Use it from the app's own page, or from the web page at app.komposit.werq.dev in Chrome, Edge, Arc, Brave or Firefox. On the web page, an API key you paste stays in your browser, and requests go from there straight to the AI service you chose; the app on your computer does the work in your documents. The web page asks you to sign in with Google first; the app's own page needs no account.
 - Your chats and settings stay on your computer.
 
 ## Known limits

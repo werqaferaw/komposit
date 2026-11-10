@@ -58,6 +58,20 @@ kbd, .codeline { font-family:var(--mono); font-size:12px; background:var(--panel
 .chat .live { width:7px; height:7px; border-radius:50%; background:var(--ink2); animation:pulse 1.2s ease-in-out infinite; flex:none; }
 .chat .x { color:var(--faint); opacity:0; display:grid; place-items:center; padding:2px; } .chat:hover .x { opacity:1; } .chat .x:hover { color:var(--ink); }
 .chat .x .ic { width:15px; height:15px; }
+/* The account row (web page): Sign in, or who is signed in. */
+#account { margin-top:auto; padding:10px 12px; border-top:1px solid var(--edge); }
+#account[hidden] { display:none; }
+#account:not([hidden]) + #sidefoot { margin-top:0; }
+.acct { width:100%; display:flex; align-items:center; gap:9px; padding:9px 12px; background:var(--panel); border:1px solid var(--edge2); border-radius:9px; color:var(--ink); font-size:13px; font-weight:500; cursor:pointer; transition:.15s; text-align:left; }
+.acct:hover { background:var(--panel2); border-color:var(--dim); }
+.acct .ic { flex:none; }
+.acct .nm { min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.acct.in { background:transparent; border-color:transparent; padding:6px 4px; color:var(--ink2); font-weight:400; }
+.acct.in:hover { background:var(--panel); color:var(--ink); }
+#signin .card2 p { margin:0 0 14px; line-height:1.55; }
+#signin .card2 .gate-foot { margin:18px 0 0; }
+#signin .card2 .err-text:empty { display:none; }
+#signin .card2 .err-text { margin-bottom:12px; }
 #sidefoot { margin-top:auto; border-top:1px solid var(--edge); padding:10px 10px 10px 16px; display:flex; align-items:center; gap:9px; font-size:12px; }
 #engine { font-family:var(--mono); font-size:11px; color:var(--dim); line-height:1.35; flex:1; min-width:0; }
 #engine b { color:var(--ink2); font-weight:500; display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }

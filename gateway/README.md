@@ -115,6 +115,8 @@ For a session:
 
 ## Sign-in with Google (optional)
 
+Optional for the gateway: invites work without it. Komposit's own hosted page asks its visitors to sign in whenever the gateway offers it (`/health` says `signIn: true`).
+
 The flow is OAuth 2.0 authorization code with PKCE (S256), `state` and `nonce`, scope `openid email profile`, `prompt=select_account`.
 
 1. The page sends the browser (a top-level navigation, not a fetch) to `/auth/google/start?return=https://app.komposit.werq.dev`. `return` must be exactly an allowed origin: no path, query or user info. Anything else gets a plain error page, never a redirect.

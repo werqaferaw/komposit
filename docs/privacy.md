@@ -1,9 +1,10 @@
 # Privacy: signing in to Komposit
 
-Signing in is optional. Everything in Komposit works without an account: the
-app, the hosted page, and invite codes. An account is only for things that need
-one. Today that is a single thing: using an allowance the Komposit owner has
-granted you, without an invite code.
+The web page (app.komposit.werq.dev) asks you to sign in with Google before your
+first request. The app's own page on your computer (`http://127.0.0.1:4321`)
+needs no account, and everything in Komposit works there without one. An
+account also lets you use an allowance, if the Komposit owner has granted you
+one, without an invite code.
 
 ## What signing in stores
 
@@ -42,7 +43,8 @@ session or what you wrote.
 
 ## What it is used for
 
-Only to let you use your allowance and to show you how much of it is left. It
+To let you use Komposit on the web, and to let you use an allowance if you were
+granted one (and show you how much of it is left). It
 is not used for marketing, and it is not shared or sold.
 
 ## Deleting it

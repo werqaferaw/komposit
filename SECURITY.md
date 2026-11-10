@@ -64,7 +64,10 @@ stay on your computer, in Komposit's settings file (mode 0600 on macOS). The
 invite gateway (`gateway/`) holds the owner's Anthropic key server-side; invite
 codes and sign-in sessions are stored only as SHA-256 hashes.
 
-Signing in with Google is optional. It uses the OAuth authorization code flow
+The hosted page asks people to sign in with Google before a request; the app's
+own local page needs no account. That requirement lives in the page, not in the
+local server, which knows nothing about accounts: the four locks above are what
+protect it. Sign-in uses the OAuth authorization code flow
 with PKCE, a single-use state tied to the browser that started it, and a nonce.
 It stores only Google's id for the account, a verified email, the name and the
 allowance, and you can delete the account yourself

@@ -328,6 +328,13 @@ The same files run in two places:
      - Not paired: Connect through `/connect`.
 
 After connecting:
+- **Sign-in (hosted page only):** when the gateway offers it (`/health` says
+  `signIn`), the page asks for a Google sign-in once the workspace shows, and
+  again before a request is sent (`mustSignIn` in `ui/app.js`); what was typed
+  survives the trip to Google. The session is kept in that browser
+  (`komposit.account`); Settings has Sign out and Delete account. The app's own
+  page has no accounts, and if the gateway can't be reached the hosted page
+  works without sign-in rather than locking everyone out.
 - **Onboarding** (3 steps): pick the AI, connect the Adobe apps (permissions), try a first edit.
 - **Workspace:** composer (app picker, effort, attach, paste or drop reference images; Enter sends), recent files with real renders, folder tree, chats, Settings.
 
@@ -413,7 +420,7 @@ the first real-PC test: [windows-testing.md](windows-testing.md).
   - **Auth:** the API key (`x-api-key` or bearer) is an invite code (`kp_…`) or
     the session of a signed-in account (`ks_…`). Both are stored only as SHA-256
     hashes: invites in KV, sessions in D1.
-  - **Sign-in (optional; nothing needs it):** Google OAuth, authorization code
+  - **Sign-in (the hosted page asks for it; the gateway works without it):** Google OAuth, authorization code
     + PKCE + state + nonce, at `/auth/google/start?return=<origin>` and
     `/auth/google/callback`. The session goes back to the page in a URL fragment
     (`#ks=`). Accounts and sessions are in D1 (`migrations/`). `POST /auth/logout`
@@ -500,7 +507,7 @@ scripts/            check.mjs · test-live.mjs (cross-platform npm scripts)
 .github/workflows/  test.yml (unit tests on every push and pull request)
                     · windows.yml (tests, build, smoke tests, installer artifact)
 web/                Cloudflare Worker for the hosted UI · harness.mjs (the page's agent loop) · build.mjs (bundle + UI)
-gateway/            Cloudflare Worker: invite gateway, optional Google sign-in (D1)
+gateway/            Cloudflare Worker: invite gateway, Google sign-in for the hosted page (D1)
 brand/              logo files from the spec (04.C solid tile, wordmark, lockup) · README
 docs/               architecture.md (this) · getting-started.md · windows.md · windows-testing.md
                     · releasing.md · release-notes.md · privacy.md (what sign-in stores)
@@ -514,8 +521,8 @@ docs/               architecture.md (this) · getting-started.md · windows.md �
 Anthropic, Gemini, OpenAI-compatible and invite engines (Codex and Gemini
 checked with real sign-ins and real edits in Photoshop); onboarding; chat
 history; the hosted page, which runs a turn itself when its key is kept in the
-browser. The invite gateway and its optional Google sign-in are by invitation
-and may be off. **Windows** is an early build: tested automatically on a PC
+browser, and asks for a Google sign-in when the gateway offers it. Invites and
+allowances through the gateway are by invitation and may be off. **Windows** is an early build: tested automatically on a PC
 without Adobe apps, not yet on a real PC with Adobe apps
 ([windows-testing.md](windows-testing.md)).
 

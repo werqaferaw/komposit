@@ -50,6 +50,15 @@ the **^** arrow), and Komposit opens in your browser.
 The Windows version is new: it installs and runs, but it hasn't had much time
 with real Adobe apps on Windows yet. Please [open an issue](https://github.com/werqaferaw/komposit/issues) for anything that breaks.
 
+### The web page and the app's own page
+
+On a Mac with Chrome, Edge, Arc, Brave or Firefox, Komposit opens as a web page,
+**app.komposit.werq.dev**, connected to the app on your computer. The web page
+asks you to **sign in with Google** before your first request
+([what that keeps](privacy.md)). Rather not? The app's own page,
+`http://127.0.0.1:4321`, is the same Komposit with no account (it's what opens
+in Safari and on Windows); Settings on the web page has a button for it.
+
 ## 2. Set up (in the browser)
 
 1. **Choose your AI.**

@@ -76,6 +76,12 @@ talks to your AI, and gives the model a handful of tools: `inspect`, `edit`,
 requests from Komposit's own UI (host, origin, token and JSON checks; see
 [SECURITY.md](SECURITY.md)).
 
+The same UI also runs as a web page at [app.komposit.werq.dev](https://app.komposit.werq.dev),
+connected to the app on your computer. There, with an API key kept in your
+browser, the page runs the agent itself and calls your AI directly, and the app
+only runs the tools. The web page asks you to sign in with Google
+([what that keeps](docs/privacy.md)); the app's own page needs no account.
+
 | Directory | What's there |
 |---|---|
 | `companion/` | The local server: routes, settings, chats, the agent loop (`harness/`), AI engines (`engines/`, `providers/`), per-app bridges (`bridges/`), and everything OS-specific in `platform/` |
