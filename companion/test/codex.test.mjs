@@ -413,7 +413,9 @@ test("a turn Codex reports as failed is one error", unix, async () => {
   });
 });
 
-test("a broken install: the turn and the settings check say how to reinstall", unix, async () => {
+// macOS refuses to start a file it can't recognize (ENOEXEC: a half-finished
+// update); Linux's execvp runs it with /bin/sh instead, so this is macOS only.
+test("a broken install: the turn and the settings check say how to reinstall", { skip: process.platform !== "darwin" }, async () => {
   const p = join(TMP, "broken", "codex");
   mkdirSync(dirname(p), { recursive: true });
   writeFileSync(p, 'echo "not a real program" >&2\nexit 1\n'); // no #! line: ENOEXEC

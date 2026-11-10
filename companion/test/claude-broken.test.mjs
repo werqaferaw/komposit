@@ -33,7 +33,12 @@ test("an npm install is reinstalled with npm, others with the installer", { skip
   }
 });
 
-test("spawning the placeholder fails with ENOEXEC, which counts as broken", { skip: process.platform === "win32" }, async () => {
+// macOS refuses to start a file it can't recognize (ENOEXEC), which is how the
+// broken update shows up there. Linux's execvp runs such a file with /bin/sh
+// instead, so there is nothing to catch on Linux (and Windows has no such file).
+const NO_ENOEXEC = process.platform === "win32" || process.platform === "linux";
+
+test("spawning the placeholder fails with ENOEXEC, which counts as broken", { skip: NO_ENOEXEC }, async () => {
   const dir = mkdtempSync(join(tmpdir(), "komposit-claude-"));
   try {
     const p = join(dir, "claude");
