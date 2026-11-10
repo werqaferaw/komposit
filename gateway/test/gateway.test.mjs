@@ -107,7 +107,9 @@ before(
       value: JSON.stringify(record),
     }));
     await writeFile(seedFile, JSON.stringify(entries));
-    const seedInvites = execFileAsync(
+    // One wrangler at a time: they share the local store, and two at once can
+    // collide on its SQLite lock (SQLITE_BUSY, seen on Linux).
+    await execFileAsync(
       process.execPath,
       [WRANGLER, "kv", "bulk", "put", seedFile, "--binding", "INVITES", "--local", "--persist-to", persistDir],
       { cwd: GATEWAY_DIR, env: wranglerEnv() },
@@ -115,18 +117,15 @@ before(
     // Create the local D1 with the migrations an operator applies, then add the seeded accounts.
     const accountsFile = path.join(stateDir, "accounts.sql");
     await writeFile(accountsFile, seedAccountsSql());
-    const seedAccounts = (async () => {
-      await execFileAsync(process.execPath, [WRANGLER, "d1", "migrations", "apply", "DB", "--local", "--persist-to", persistDir], {
-        cwd: GATEWAY_DIR,
-        env: wranglerEnv(),
-      });
-      await execFileAsync(
-        process.execPath,
-        [WRANGLER, "d1", "execute", "DB", "--local", "--persist-to", persistDir, "--file", accountsFile],
-        { cwd: GATEWAY_DIR, env: wranglerEnv() },
-      );
-    })();
-    await Promise.all([seedInvites, seedAccounts]);
+    await execFileAsync(process.execPath, [WRANGLER, "d1", "migrations", "apply", "DB", "--local", "--persist-to", persistDir], {
+      cwd: GATEWAY_DIR,
+      env: wranglerEnv(),
+    });
+    await execFileAsync(
+      process.execPath,
+      [WRANGLER, "d1", "execute", "DB", "--local", "--persist-to", persistDir, "--file", accountsFile],
+      { cwd: GATEWAY_DIR, env: wranglerEnv() },
+    );
 
     worker = spawn(
       process.execPath,
@@ -876,7 +875,8 @@ test("DELETE /v1/me deletes the account, all its sessions and its usage counters
     const info = await me(one.session);
     return info.usage.thisMonth.outputTokens > 0 && info.usage.today.requests === 1;
   }, "usage to be recorded");
-  const [[{ id }], keys] = await Promise.all([d1("SELECT id FROM users WHERE google_sub = 'g-delete'"), usageKeys("")]);
+  const [{ id }] = await d1("SELECT id FROM users WHERE google_sub = 'g-delete'");
+  const keys = await usageKeys("");
   const counters = keys.filter((key) => key.includes(`:user:${id}:`));
   assert.equal(counters.length, 2, `a request counter and a token counter: ${counters}`);
 
@@ -889,13 +889,11 @@ test("DELETE /v1/me deletes the account, all its sessions and its usage counters
   for (const session of [one.session, two.session]) {
     await expectError(await fetch(`${gateway}/v1/me`, { headers: { "x-api-key": session } }), 401, "authentication_error");
   }
-  const [[left], keysAfter] = await Promise.all([
-    d1(
-      `SELECT (SELECT COUNT(*) FROM users WHERE id = ${id} OR google_sub = 'g-delete' OR email = 'delete.me@example.com') AS users, ` +
-        `(SELECT COUNT(*) FROM sessions WHERE user_id = ${id}) AS sessions`,
-    ),
-    usageKeys(""),
-  ]);
+  const [left] = await d1(
+    `SELECT (SELECT COUNT(*) FROM users WHERE id = ${id} OR google_sub = 'g-delete' OR email = 'delete.me@example.com') AS users, ` +
+      `(SELECT COUNT(*) FROM sessions WHERE user_id = ${id}) AS sessions`,
+  );
+  const keysAfter = await usageKeys("");
   assert.deepEqual(left, { users: 0, sessions: 0 });
   assert.deepEqual(keysAfter.filter((key) => key.includes(`:user:${id}:`)), []);
 
