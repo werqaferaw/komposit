@@ -600,7 +600,12 @@ function aiChooser(box, setup, { saveLabel = "Save", onSaved } = {}) {
     const acct = $("#f-acct", box);
     if (acct) accountCall("/v1/me").then((r) => {
       if (!acct.isConnected) return;
-      if (r.status === 401) { forgetAccount(); Object.assign(mine, publicPageAI()); acct.textContent = "This sign-in has ended. Sign in again."; renderEngine(); return; }
+      if (r.status === 401) {
+        // The session ended (signed out elsewhere, expired, or deleted): back to signed out.
+        forgetAccount(); Object.assign(mine, publicPageAI()); renderEngine(); render();
+        const e = $("#f-err", box); if (e) { e.className = "err-text"; e.textContent = "This sign-in has ended. Sign in again."; }
+        return;
+      }
       const me = r.json || {};
       const v = pageAI.read();
       if (v.account && (me.name || me.email)) { v.account.name = me.name || null; v.account.email = me.email || null; pageAI.write(v); renderEngine(); }
@@ -779,7 +784,7 @@ async function openSettings(section) {
   });
   if (signIn.note) {
     const e = $("#f-err", box);
-    if (e) { e.className = signIn.note === "Signed in." ? "ok-text" : "err-text"; e.textContent = signIn.note; }
+    if (e && !e.textContent) { e.className = signIn.note === "Signed in." ? "ok-text" : "err-text"; e.textContent = signIn.note; }
     signIn.note = "";
   }
   if (section === "apps") $("#s-apps", box).scrollIntoView({ block: "center" });
