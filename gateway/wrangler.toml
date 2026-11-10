@@ -32,7 +32,7 @@ custom_domain = true
 binding = "INVITES"
 # TODO before deploying: setup.sh writes the id here (or run
 # `npx wrangler kv namespace create komposit-gateway-INVITES` and paste the id it prints).
-id = "TODO-replace-with-INVITES-namespace-id"
+id = "523501942c6d40d2b73859483acfd8fd"
 
 # Usage counters: req:<hash>:<YYYY-MM-DD> (requests that UTC day),
 # tok:<hash>:<YYYY-MM> (token totals that UTC month). Signed-in accounts use
@@ -41,7 +41,7 @@ id = "TODO-replace-with-INVITES-namespace-id"
 binding = "USAGE"
 # TODO before deploying: setup.sh writes the id here (or run
 # `npx wrangler kv namespace create komposit-gateway-USAGE` and paste the id it prints).
-id = "TODO-replace-with-USAGE-namespace-id"
+id = "99339a1638164e22898760be0979ea73"
 
 # Accounts for the optional Google sign-in: users, sessions, one-time OAuth
 # state (schema in migrations/). Invites keep working without it.
@@ -50,7 +50,7 @@ binding = "DB"
 database_name = "komposit-gateway"
 # TODO before deploying: setup.sh creates the database and writes its id here
 # (or run `npx wrangler d1 create komposit-gateway` and paste the database_id).
-database_id = "TODO-replace-with-D1-database-id"
+database_id = "33565494-c1fb-4cd0-9cde-40da4587fda2"
 migrations_dir = "migrations"
 
 [vars]

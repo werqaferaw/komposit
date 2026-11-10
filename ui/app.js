@@ -222,8 +222,17 @@ async function hostedConnect() {
   if (h.get("k")) {
     store.set("token", h.get("k"));
     if (h.get("p")) store.set("port", h.get("p"));
-    history.replaceState(null, "", location.pathname + location.search);
   }
+  // Back from signing in with Google: the session (or why it didn't work)
+  // arrives in the fragment, which never reaches a server.
+  if (h.get("ks") && /^ks_[a-z2-7]{52}$/.test(h.get("ks"))) {
+    const v = pageAI.read();
+    v.account = { session: h.get("ks") };
+    v.mode = "account";
+    pageAI.write(v);
+    signIn.note = "Signed in.";
+  } else if (h.get("ks_error")) signIn.note = SIGN_IN_ERRORS[h.get("ks_error")] || "Signing in didn't work. Try again.";
+  if (h.get("k") || h.get("ks") || h.get("ks_error")) history.replaceState(null, "", location.pathname + location.search);
   K.token = store.get("token") || "";
   const saved = Number(store.get("port")) || 4321;
   if (isWebKitOnly()) return gateSafari(saved);
@@ -342,6 +351,39 @@ function publicPageAI(v = pageAI.read()) {
     account: { signedIn: !!v.account?.session, name: v.account?.name || null, email: v.account?.email || null },
   };
 }
+// Signing in with Google (optional, never a wall): a Komposit account uses the
+// allowance Komposit granted it, through the gateway, with no key or code.
+const SIGN_IN_ERRORS = {
+  cancelled: "Signing in was cancelled.",
+  expired: "That sign-in took too long. Try again.",
+  state: "That sign-in didn't match this page. Try again.",
+  unavailable: "Signing in isn't available right now.",
+};
+const signIn = { note: "" };
+const gatewayURL = () => HARNESS()?.DEFAULT_GATEWAY || "https://gateway.komposit.werq.dev";
+async function gatewayInfo() {
+  try {
+    const r = await fetch(`${gatewayURL()}/health`, { signal: AbortSignal.timeout(4000) });
+    const j = await r.json().catch(() => ({}));
+    return { up: r.ok && j.ok !== false, signIn: !!j.signIn };
+  } catch { return { up: false, signIn: false }; }
+}
+async function accountCall(path, method = "GET") {
+  const session = pageAI.read().account?.session;
+  if (!session) return { status: 401 };
+  try {
+    const r = await fetch(gatewayURL() + path, { method, headers: { authorization: `Bearer ${session}` } });
+    return { status: r.status, json: r.status === 204 ? null : await r.json().catch(() => null) };
+  } catch { return { status: 0 }; }
+}
+function forgetAccount() {
+  const v = pageAI.read();
+  delete v.account;
+  if (v.mode === "account") delete v.mode;
+  pageAI.write(v);
+}
+function startSignIn() { location.href = `${gatewayURL()}/auth/google/start?return=${encodeURIComponent(location.origin)}`; }
+
 // The AI this page uses: the one kept in this browser, else the app's.
 function currentAI() { return runsHere() ? publicPageAI() : { ...(S.status?.ai || {}), where: "app" }; }
 
@@ -365,6 +407,7 @@ async function connected() {
   loadWorkspace();
   const last = store.get("chat");
   if (last && location.hash === "#chat") openChat(last);
+  if (signIn.note) openSettings(); // back from signing in: say how it went
 }
 
 function renderEngine() {
@@ -397,7 +440,8 @@ async function obAI() {
   const g = gate(`${dots(1)}<h1>How should Komposit think?</h1>
     <p class="lead">Komposit works with the AI you already have. ${canRunHere() ? "Keys you enter here stay in this browser" : `Keys stay on this ${w("device")}`} and go only to the service you pick.</p>
     <div id="ob-ai"></div>`);
-  const setup = await getJSON("/api/setup?fresh=1");
+  const [setup, gateway] = await Promise.all([getJSON("/api/setup?fresh=1"), canRunHere() ? gatewayInfo() : null]);
+  if (gateway) setup.gateway = gateway;
   aiChooser($("#ob-ai", g), setup, {
     saveLabel: "Continue",
     onSaved: async () => { S.status = await getJSON("/api/status"); renderEngine(); obApps(); },
@@ -453,6 +497,7 @@ function aiChooser(box, setup, { saveLabel = "Save", onSaved } = {}) {
   let pick = mine?.mode || appAI.mode || (cl.installed ? "claude-code" : "anthropic");
   const presets = setup.presets || {};
   const keptHere = (service) => (here ? `<div class="muted">Kept in this browser and sent only to ${service}.</div>` : "");
+  const gw = setup.gateway || {}; // the hosted page asks the gateway itself (sign-in)
   // The invite service isn't always running: offer invites only when it answers, or one is saved.
   const inviteOK = setup.gatewayUp !== false || !!savedIn("invite");
   const OPTIONS = [
@@ -462,7 +507,8 @@ function aiChooser(box, setup, { saveLabel = "Save", onSaved } = {}) {
     { id: "gemini", t: "Google Gemini API key", d: "Pay as you go with a key from Google AI Studio. Runs the best Gemini model your key can use." },
     { id: "openai", t: "OpenRouter or another OpenAI-compatible service", d: "Use a key from OpenRouter, OpenAI, or a compatible service." },
     { id: "invite", t: "Invite code", d: "Got a code from Komposit? Use it instead of your own AI account." },
-  ].filter((o) => o.id !== "invite" || inviteOK);
+    { id: "account", t: "Komposit account", d: "Sign in with Google and use the allowance Komposit gave your account. No key or code." },
+  ].filter((o) => (o.id !== "invite" || inviteOK) && (o.id !== "account" || (here && ((gw.up && gw.signIn) || mine?.account?.signedIn))));
   if (!OPTIONS.some((o) => o.id === pick)) pick = OPTIONS[0].id;
   function body(id) {
     if (id === "claude-code") {
@@ -517,6 +563,15 @@ function aiChooser(box, setup, { saveLabel = "Save", onSaved } = {}) {
         ${here ? `<div class="muted" id="f-owhere"></div>` : ""}
         <span hidden id="f-opre">${pre}</span>`;
     }
+    if (id === "account") {
+      const acc = mine?.account || {};
+      if (!acc.signedIn) return `<div class="muted">Optional. Everything else works without an account.</div>
+        <div><button class="btn small primary" data-signin>Sign in with Google</button></div>
+        <div class="muted">Komposit keeps only your Google account id, email and name. <a href="https://komposit.werq.dev/privacy" target="_blank" rel="noopener">Privacy</a></div>`;
+      return `<div class="status-line ok">${ic("checkCircle")}<span>Signed in${acc.name || acc.email ? ` as ${esc(acc.name || acc.email)}` : ""}.</span></div>
+        <div class="muted" id="f-acct">Checking your allowance</div>
+        <div class="actions" style="justify-content:flex-start"><button class="btn small" data-signout>Sign out</button><button class="btn small" data-delacct>Delete account</button></div>`;
+    }
     const saved = ai.invite?.hasCode ? `<div class="muted">Saved code${where("invite")}: <kbd>${esc(ai.invite.codeHint)}</kbd>${ai.invite.name ? ` (${esc(ai.invite.name)})` : ""}.</div>` : "";
     return `<input class="field mono" id="f-invite" placeholder="kp_..." autocomplete="off" spellcheck="false" />${saved}
       <div class="muted">Invite codes have a daily limit. Your requests go through Komposit's server to Anthropic.</div>${keptHere("Komposit's invite service")}`;
@@ -530,6 +585,27 @@ function aiChooser(box, setup, { saveLabel = "Save", onSaved } = {}) {
     $$("[data-copy]", box).forEach((b) => (b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.copy); b.innerHTML = ic("check") + " Copied"; } catch {} }));
     const rc = $("[data-recheck]", box);
     if (rc) rc.onclick = async () => { rc.disabled = true; const s = await getJSON("/api/setup?fresh=1"); Object.assign(cl, s.claude); render(); };
+    const si = $("[data-signin]", box);
+    if (si) si.onclick = startSignIn;
+    const so = $("[data-signout]", box);
+    if (so) so.onclick = async () => { so.disabled = true; await accountCall("/auth/logout", "POST"); forgetAccount(); Object.assign(mine, publicPageAI()); renderEngine(); render(); };
+    const del = $("[data-delacct]", box);
+    if (del) del.onclick = async () => {
+      if (del.dataset.armed !== "1") { del.dataset.armed = "1"; del.textContent = "Delete it for good?"; setTimeout(() => { if (del.isConnected) { del.dataset.armed = ""; del.textContent = "Delete account"; } }, 3000); return; }
+      del.disabled = true;
+      const r = await accountCall("/v1/me", "DELETE");
+      if (r.status === 204 || r.status === 401) { forgetAccount(); Object.assign(mine, publicPageAI()); renderEngine(); render(); }
+      else { del.disabled = false; $("#f-err", box).textContent = "Couldn't delete the account just now. Try again."; }
+    };
+    const acct = $("#f-acct", box);
+    if (acct) accountCall("/v1/me").then((r) => {
+      if (!acct.isConnected) return;
+      if (r.status === 401) { forgetAccount(); Object.assign(mine, publicPageAI()); acct.textContent = "This sign-in has ended. Sign in again."; renderEngine(); return; }
+      const me = r.json || {};
+      const v = pageAI.read();
+      if (v.account && (me.name || me.email)) { v.account.name = me.name || null; v.account.email = me.email || null; pageAI.write(v); renderEngine(); }
+      acct.textContent = r.status === 200 ? (me.allowance > 0 ? "Your account has an allowance from Komposit." : "No allowance yet. Komposit grants them one by one; you'll be able to use it once yours is in.") : "Couldn't reach the account service just now.";
+    });
     const rcx = $("[data-recheck-codex]", box);
     if (rcx) rcx.onclick = async () => { rcx.disabled = true; const s = await getJSON("/api/setup?fresh=1"); Object.assign(cx, s.codex || {}); render(); };
     if (pick === "openai") {
@@ -565,6 +641,12 @@ function aiChooser(box, setup, { saveLabel = "Save", onSaved } = {}) {
     // through the app.
     const typed = payload.apiKey || payload.code;
     const custom = pick === "openai" && $("#f-oprov", box).value === "custom";
+    if (pick === "account") {
+      if (!mine?.account?.signedIn) { err.textContent = "Sign in with Google first."; return; }
+      const v = pageAI.read(); v.mode = "account"; pageAI.write(v);
+      if (onSaved) await onSaved({ ok: true, where: "browser" });
+      return;
+    }
     const inBrowser = here && ["anthropic", "gemini", "openai", "invite"].includes(pick) && !custom && (typed || savedIn(pick) === "browser" || !savedIn(pick));
     btn.disabled = true; btn.innerHTML = `<span class="spinner"></span> Checking`;
     try {
@@ -689,11 +771,17 @@ async function openSettings(section) {
     openSettings();
   };
   appsPanel($("#s-apps", box));
-  const setup = await getJSON("/api/setup?fresh=1");
+  const [setup, gateway] = await Promise.all([getJSON("/api/setup?fresh=1"), canRunHere() ? gatewayInfo() : null]);
+  if (gateway) setup.gateway = gateway;
   aiChooser($("#s-ai", box), setup, {
     saveLabel: "Save",
     onSaved: async (r) => { S.status = await getJSON("/api/status"); renderEngine(); const e = $("#f-err", box); if (e) { e.className = "ok-text"; e.textContent = r?.where === "browser" ? "Saved in this browser." : "Saved."; } },
   });
+  if (signIn.note) {
+    const e = $("#f-err", box);
+    if (e) { e.className = signIn.note === "Signed in." ? "ok-text" : "err-text"; e.textContent = signIn.note; }
+    signIn.note = "";
+  }
   if (section === "apps") $("#s-apps", box).scrollIntoView({ block: "center" });
 }
 
