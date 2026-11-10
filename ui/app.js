@@ -312,6 +312,39 @@ const S = {
   appAutoSet: false,
 };
 
+/* ---------------- AI kept in this browser (hosted page) ----------------
+   On the hosted page, API keys can stay in the browser. The page then runs the
+   agent loop itself (window.KompositHarness, built from the same harness as
+   the app) and calls the AI service straight from here; the Komposit app on
+   this computer only runs the tools and keeps the chat. Subscriptions (Claude
+   Code, Codex) and custom service addresses always run in the app, and the
+   local page keeps everything in the app, as before. */
+const HARNESS = () => window.KompositHarness || null;
+const BROWSER_MODES = ["anthropic", "gemini", "openai", "invite", "account"];
+const pageAI = {
+  read() { try { return JSON.parse(store.get("ai") || "null") || {}; } catch { return {}; } },
+  write(v) { store.set("ai", JSON.stringify(v)); },
+  forget(mode) { const v = this.read(); if (mode) delete v[mode]; if (!mode || v.mode === mode) delete v.mode; this.write(v); },
+};
+// Whether this page can run turns itself: the hosted page, with the harness
+// loaded, talking to an app that records page-run turns.
+function canRunHere() { return K.mode === "hosted" && !!HARNESS() && (S.status?.features || []).includes("page-turns"); }
+function runsHere() { return canRunHere() && BROWSER_MODES.includes(pageAI.read().mode); }
+function hintOf(k) { if (!k) return null; const s = String(k); return s.length <= 12 ? "…" + s.slice(-4) : s.slice(0, 7) + "…" + s.slice(-4); }
+// The same shape as the app's AI summary (hints, never the secrets).
+function publicPageAI(v = pageAI.read()) {
+  return {
+    mode: BROWSER_MODES.includes(v.mode) ? v.mode : null, where: "browser",
+    anthropic: { hasKey: !!v.anthropic?.apiKey, keyHint: hintOf(v.anthropic?.apiKey), model: v.anthropic?.model || null },
+    gemini: { hasKey: !!v.gemini?.apiKey, keyHint: hintOf(v.gemini?.apiKey), model: v.gemini?.model || null },
+    openai: { hasKey: !!v.openai?.apiKey, keyHint: hintOf(v.openai?.apiKey), baseUrl: v.openai?.baseUrl || null, model: v.openai?.model || null },
+    invite: { hasCode: !!v.invite?.code, codeHint: hintOf(v.invite?.code), name: v.invite?.name || null },
+    account: { signedIn: !!v.account?.session, name: v.account?.name || null, email: v.account?.email || null },
+  };
+}
+// The AI this page uses: the one kept in this browser, else the app's.
+function currentAI() { return runsHere() ? publicPageAI() : { ...(S.status?.ai || {}), where: "app" }; }
+
 /* ---------------- after connecting ---------------- */
 async function connected() {
   try {
@@ -326,7 +359,7 @@ async function connected() {
   wireComposer($("#composer-start"));
   wireComposer($("#composer-dock"));
   renderEngine();
-  if (!S.status.onboarded || !S.status.ai.mode) return onboarding(S.status.ai.mode ? 2 : 1);
+  if (!S.status.onboarded || !currentAI().mode) return onboarding(currentAI().mode ? 2 : 1);
   ungate();
   loadChats();
   loadWorkspace();
@@ -335,7 +368,7 @@ async function connected() {
 }
 
 function renderEngine() {
-  const ai = S.status?.ai || {};
+  const ai = currentAI();
   let title = "No AI chosen", sub = "Open settings";
   if (ai.mode === "claude-code") { title = "Claude subscription"; sub = "via Claude Code"; }
   else if (ai.mode === "codex") { title = "ChatGPT subscription"; sub = "via Codex"; }
@@ -347,6 +380,7 @@ function renderEngine() {
     title = /openrouter/.test(host) ? "OpenRouter" : host === "api.openai.com" ? "OpenAI" : host || "OpenAI-compatible";
     sub = ai.openai?.model || "";
   } else if (ai.mode === "invite") { title = "Invite"; sub = ai.invite?.name || "Komposit's key"; }
+  else if (ai.mode === "account") { title = "Komposit account"; sub = ai.account?.name || ai.account?.email || "Signed in"; }
   $("#engine").innerHTML = `<b>${esc(title)}</b><span>${esc(sub)}</span>`;
 }
 
@@ -361,7 +395,7 @@ async function onboarding(step) {
 
 async function obAI() {
   const g = gate(`${dots(1)}<h1>How should Komposit think?</h1>
-    <p class="lead">Komposit works with the AI you already have. Keys stay on this ${w("device")} and go only to the service you pick.</p>
+    <p class="lead">Komposit works with the AI you already have. ${canRunHere() ? "Keys you enter here stay in this browser" : `Keys stay on this ${w("device")}`} and go only to the service you pick.</p>
     <div id="ob-ai"></div>`);
   const setup = await getJSON("/api/setup?fresh=1");
   aiChooser($("#ob-ai", g), setup, {
@@ -405,11 +439,22 @@ async function obFirst() {
 
 /* AI chooser (onboarding step 1 and Settings) */
 function aiChooser(box, setup, { saveLabel = "Save", onSaved } = {}) {
-  const ai = setup.ai || {};
+  // On the hosted page, API keys can be kept in this browser (the page then runs
+  // the turns); a key saved in the app keeps working through the app.
+  const here = canRunHere();
+  const appAI = setup.ai || {};
+  const mine = here ? publicPageAI() : null;
+  const savedIn = (id) => (mine && (mine[id]?.hasKey || mine[id]?.hasCode) ? "browser" : (appAI[id]?.hasKey || appAI[id]?.hasCode) ? "app" : null);
+  // Hints for each choice: this browser's saved key first, else the app's.
+  const ai = new Proxy({}, { get: (_, id) => (savedIn(id) === "browser" ? mine[id] : appAI[id]) });
+  const where = (id) => (here && savedIn(id) === "browser" ? " in this browser" : here && savedIn(id) === "app" ? ` in the app on your ${w("device")}` : "");
   const cl = setup.claude || {};
   const cx = setup.codex || {};
-  let pick = ai.mode || (cl.installed ? "claude-code" : "anthropic");
+  let pick = mine?.mode || appAI.mode || (cl.installed ? "claude-code" : "anthropic");
   const presets = setup.presets || {};
+  const keptHere = (service) => (here ? `<div class="muted">Kept in this browser and sent only to ${service}.</div>` : "");
+  // The invite service isn't always running: offer invites only when it answers, or one is saved.
+  const inviteOK = setup.gatewayUp !== false || !!savedIn("invite");
   const OPTIONS = [
     { id: "claude-code", t: "Claude subscription", d: `Your Claude Pro or Max plan, through Claude Code on this ${w("device")}. No API key.` },
     { id: "codex", t: "ChatGPT subscription (Codex)", d: `Your ChatGPT Plus or Pro plan, through Codex on this ${w("device")}. No API key.` },
@@ -417,7 +462,8 @@ function aiChooser(box, setup, { saveLabel = "Save", onSaved } = {}) {
     { id: "gemini", t: "Google Gemini API key", d: "Pay as you go with a key from Google AI Studio. Runs the best Gemini model your key can use." },
     { id: "openai", t: "OpenRouter or another OpenAI-compatible service", d: "Use a key from OpenRouter, OpenAI, or a compatible service." },
     { id: "invite", t: "Invite code", d: "Got a code from Komposit? Use it instead of your own AI account." },
-  ];
+  ].filter((o) => o.id !== "invite" || inviteOK);
+  if (!OPTIONS.some((o) => o.id === pick)) pick = OPTIONS[0].id;
   function body(id) {
     if (id === "claude-code") {
       let st;
@@ -449,16 +495,16 @@ function aiChooser(box, setup, { saveLabel = "Save", onSaved } = {}) {
       return st + (cx.usesSubscription ? "" : `<div><button class="btn small" data-recheck-codex>${ic("refresh")} Check again</button></div>`);
     }
     if (id === "anthropic") {
-      const saved = ai.anthropic?.hasKey ? `<div class="muted">Saved key: <kbd>${esc(ai.anthropic.keyHint)}</kbd>. Paste a new one to replace it.</div>` : "";
+      const saved = ai.anthropic?.hasKey ? `<div class="muted">Saved key${where("anthropic")}: <kbd>${esc(ai.anthropic.keyHint)}</kbd>. Paste a new one to replace it.</div>` : "";
       return `<input class="field mono" type="password" id="f-akey" placeholder="sk-ant-..." autocomplete="off" spellcheck="false" />${saved}
-        <div class="muted">Create a key at console.anthropic.com under API keys.</div>`;
+        <div class="muted">Create a key at console.anthropic.com under API keys.</div>${keptHere("Anthropic")}`;
     }
     if (id === "gemini") {
       const g = ai.gemini || {};
-      const saved = g.hasKey ? `<div class="muted">Saved key: <kbd>${esc(g.keyHint)}</kbd>${g.model ? `, using <kbd>${esc(g.model)}</kbd>` : ""}. Paste a new one to replace it.</div>` : "";
+      const saved = g.hasKey ? `<div class="muted">Saved key${where("gemini")}: <kbd>${esc(g.keyHint)}</kbd>${g.model ? `, using <kbd>${esc(g.model)}</kbd>` : ""}. Paste a new one to replace it.</div>` : "";
       return `<input class="field mono" type="password" id="f-gkey" placeholder="Gemini API key" autocomplete="off" spellcheck="false" />${saved}
         <input class="field mono" id="f-gmodel" placeholder="Model (optional; the best one your key can use)" value="" autocomplete="off" spellcheck="false" />
-        <div class="muted">Create a key at aistudio.google.com under Get API key. Pro-class models need billing turned on there; without it, Komposit uses the best model your key can.</div>`;
+        <div class="muted">Create a key at aistudio.google.com under Get API key. Pro-class models need billing turned on there; without it, Komposit uses the best model your key can.</div>${keptHere("Google")}`;
     }
     if (id === "openai") {
       const cur = ai.openai || {};
@@ -468,11 +514,12 @@ function aiChooser(box, setup, { saveLabel = "Save", onSaved } = {}) {
         <input class="field mono" type="password" id="f-okey" placeholder="${cur.hasKey ? "Saved key " + esc(cur.keyHint) + " (paste to replace)" : "API key"}" autocomplete="off" spellcheck="false" />
         <input class="field mono" id="f-omodel" placeholder="Model" value="${esc(cur.model || "")}" />
         <div class="muted">Pick a model that can see images: Komposit shows it renders of your document.</div>
+        ${here ? `<div class="muted" id="f-owhere"></div>` : ""}
         <span hidden id="f-opre">${pre}</span>`;
     }
-    const saved = ai.invite?.hasCode ? `<div class="muted">Saved code: <kbd>${esc(ai.invite.codeHint)}</kbd>${ai.invite.name ? ` (${esc(ai.invite.name)})` : ""}.</div>` : "";
+    const saved = ai.invite?.hasCode ? `<div class="muted">Saved code${where("invite")}: <kbd>${esc(ai.invite.codeHint)}</kbd>${ai.invite.name ? ` (${esc(ai.invite.name)})` : ""}.</div>` : "";
     return `<input class="field mono" id="f-invite" placeholder="kp_..." autocomplete="off" spellcheck="false" />${saved}
-      <div class="muted">Invite codes have a daily limit. Your requests go through Komposit's server to Anthropic.</div>`;
+      <div class="muted">Invite codes have a daily limit. Your requests go through Komposit's server to Anthropic.</div>${keptHere("Komposit's invite service")}`;
   }
   function render() {
     box.innerHTML = `<div class="choices">${OPTIONS.map((o) => `<button class="choice ${o.id === pick ? "on" : ""}" data-id="${o.id}"><span class="radio"></span><span><div class="ct">${esc(o.t)}</div><div class="cd">${esc(o.d)}</div></span></button>${o.id === pick ? `<div class="choice-body">${body(o.id)}</div>` : ""}`).join("")}</div>
@@ -492,6 +539,8 @@ function aiChooser(box, setup, { saveLabel = "Save", onSaved } = {}) {
         const p = presets[sel.value];
         base.hidden = sel.value !== "custom";
         if (fill && p) { base.value = p.baseUrl; if (!model.value || Object.values(presets).some((x) => x.model === model.value)) model.value = p.model; }
+        const wh = $("#f-owhere", box);
+        if (wh) wh.textContent = sel.value === "custom" ? `A custom address runs through the app on your ${w("device")}; the key is kept there.` : `Kept in this browser and sent only to ${sel.value === "openai" ? "OpenAI" : "OpenRouter"}.`;
       };
       sel.onchange = () => sync(true);
       sync(!ai.openai?.baseUrl);
@@ -511,18 +560,70 @@ function aiChooser(box, setup, { saveLabel = "Save", onSaved } = {}) {
       payload.model = $("#f-omodel", box).value.trim();
     }
     if (pick === "invite") payload.code = $("#f-invite", box).value.trim();
+    // Hosted page: a key typed here (or one already kept here) stays in this
+    // browser. Subscriptions, custom addresses and a key saved in the app go
+    // through the app.
+    const typed = payload.apiKey || payload.code;
+    const custom = pick === "openai" && $("#f-oprov", box).value === "custom";
+    const inBrowser = here && ["anthropic", "gemini", "openai", "invite"].includes(pick) && !custom && (typed || savedIn(pick) === "browser" || !savedIn(pick));
     btn.disabled = true; btn.innerHTML = `<span class="spinner"></span> Checking`;
     try {
-      const r = await postJSON("/api/setup/ai", payload);
-      if (r.codex) Object.assign(cx, r.codex);
+      let r;
+      if (inBrowser) r = await saveInBrowser(pick, payload);
+      else {
+        r = await postJSON("/api/setup/ai", payload);
+        if (r.codex) Object.assign(cx, r.codex);
+        if (r.ok && here) pageAI.forget(); // the app's choice is the one in use now
+      }
       if (!r.ok) { err.textContent = r.error || "That didn't work."; if (r.claude) Object.assign(cl, r.claude); return; }
-      if (onSaved) await onSaved(r);
+      if (onSaved) await onSaved({ ...r, where: inBrowser ? "browser" : "app" });
     } catch (e) { err.textContent = e.message; }
     finally { btn.disabled = false; btn.textContent = saveLabel; }
   }
   render();
 }
 const cap = (s) => String(s || "").charAt(0).toUpperCase() + String(s || "").slice(1);
+
+// Check a key from this browser (the service itself answers) and keep it here.
+async function saveInBrowser(mode, p) {
+  const H = HARNESS();
+  const v = pageAI.read();
+  try {
+    if (mode === "anthropic") {
+      const apiKey = p.apiKey || v.anthropic?.apiKey;
+      if (!apiKey) return { ok: false, error: "Paste your Anthropic API key." };
+      const chk = await H.keys.checkAnthropicKey(apiKey);
+      if (!chk.ok) return chk;
+      v.anthropic = { apiKey };
+    } else if (mode === "gemini") {
+      const apiKey = p.apiKey || v.gemini?.apiKey;
+      if (!apiKey) return { ok: false, error: "Paste your Gemini API key." };
+      const named = p.model || (apiKey === v.gemini?.apiKey && v.gemini?.pinned ? v.gemini.model : "");
+      const chk = await H.keys.checkGeminiKey(apiKey, { model: named });
+      if (!chk.ok) return chk;
+      v.gemini = { apiKey, model: chk.model, titleModel: chk.titleModel, ...(chk.pinned ? { pinned: true } : {}) };
+    } else if (mode === "openai") {
+      const apiKey = p.apiKey || v.openai?.apiKey;
+      const model = p.model || v.openai?.model;
+      if (!apiKey) return { ok: false, error: "Paste your API key." };
+      if (!model) return { ok: false, error: "Name the model to use." };
+      const chk = await H.keys.checkOpenAIKey({ apiKey, baseUrl: p.baseUrl });
+      if (!chk.ok) return chk;
+      v.openai = { apiKey, baseUrl: p.baseUrl, model, flavor: H.keys.flavorOf(p.baseUrl) };
+    } else if (mode === "invite") {
+      const code = p.code || v.invite?.code;
+      if (!code) return { ok: false, error: "Paste your invite code." };
+      const chk = await H.keys.checkInvite(code, H.DEFAULT_GATEWAY);
+      if (!chk.ok) return chk;
+      v.invite = { code, name: chk.name || null };
+    } else return { ok: false, error: "Unknown choice." };
+  } catch (e) {
+    return { ok: false, error: e.message || String(e) };
+  }
+  v.mode = mode;
+  pageAI.write(v);
+  return { ok: true };
+}
 
 /* Apps + permissions panel (onboarding step 2 and Settings) */
 async function appsPanel(box) {
@@ -574,17 +675,24 @@ async function openSettings(section) {
     <div class="row"><div class="lbl">AI</div><div id="s-ai"><div class="status-line"><span class="spinner"></span><span>Loading</span></div></div></div>
     <div class="row"><div class="lbl">Apps and permissions</div><div id="s-apps"></div></div>
     <div class="row"><div class="lbl">About</div>
-      <div class="muted">Komposit ${esc(S.status?.version || "")} preview · ${local ? `this page is served by the app on your ${w("device")}` : `connected from the web to the app on your ${w("device")}`}<br>Your settings and chats are stored in <kbd>${esc(S.status?.dataDir || "")}</kbd></div>
-      <div class="actions" style="justify-content:flex-start;margin-top:10px"><button class="btn small" id="s-rerun">Run setup again</button>${local ? "" : `<a class="btn small" href="${localCopyURL(K.port)}">${ic("external")} Open the app's own page</a>`}</div>
+      <div class="muted">Komposit ${esc(S.status?.version || "")} preview · ${local ? `this page is served by the app on your ${w("device")}` : `connected from the web to the app on your ${w("device")}`}<br>Your settings and chats are stored in <kbd>${esc(S.status?.dataDir || "")}</kbd>${canRunHere() ? `<br>API keys you enter on this page stay in this browser and go only to the AI service you chose; with one of them, this page runs each request and the app only works in your documents.` : ""}</div>
+      <div class="actions" style="justify-content:flex-start;margin-top:10px"><button class="btn small" id="s-rerun">Run setup again</button>${local ? "" : `<a class="btn small" href="${localCopyURL(K.port)}">${ic("external")} Open the app's own page</a>`}${canRunHere() ? `<button class="btn small" id="s-forget">Forget keys in this browser</button>` : ""}</div>
     </div>`;
   paintIcons(box);
   $("#s-close", box).onclick = () => m.classList.remove("on");
   $("#s-rerun", box).onclick = async () => { m.classList.remove("on"); await postJSON("/api/setup/done", { done: false }).catch(() => {}); onboarding(1); };
+  const fg = $("#s-forget", box);
+  if (fg) fg.onclick = () => {
+    if (fg.dataset.armed !== "1") { fg.dataset.armed = "1"; fg.textContent = "Forget them?"; setTimeout(() => { if (fg.isConnected) { fg.dataset.armed = ""; fg.textContent = "Forget keys in this browser"; } }, 2500); return; }
+    pageAI.write({});
+    renderEngine();
+    openSettings();
+  };
   appsPanel($("#s-apps", box));
   const setup = await getJSON("/api/setup?fresh=1");
   aiChooser($("#s-ai", box), setup, {
     saveLabel: "Save",
-    onSaved: async () => { S.status = await getJSON("/api/status"); renderEngine(); const e = $("#f-err", box); if (e) { e.className = "ok-text"; e.textContent = "Saved."; } },
+    onSaved: async (r) => { S.status = await getJSON("/api/status"); renderEngine(); const e = $("#f-err", box); if (e) { e.className = "ok-text"; e.textContent = r?.where === "browser" ? "Saved in this browser." : "Saved."; } },
   });
   if (section === "apps") $("#s-apps", box).scrollIntoView({ block: "center" });
 }
@@ -920,6 +1028,7 @@ function storedToVM(chatId, t) {
     steps: (t.steps || []).map((s) => ({ ...s, imageUrl: img(s.image), videoUrl: img(s.video) })),
     final: t.final || "",
     error: t.error ? { message: t.error, code: t.errorCode || null } : null,
+    stopReason: t.stopReason || null,
     liveText: "",
   };
 }
@@ -1048,6 +1157,9 @@ function paintTurn(v) {
     turnEl.append(n);
   }
 
+  // A turn this page was running when it closed (there's no relay to carry it on).
+  if (vm.stopReason === "page_closed") turnEl.append(el("div", "notice", `<div>This request stopped because the page running it was closed. Send it again to carry on.</div>`));
+
   // Footer: how long it took (time, never cost).
   if (vm.status !== "running") {
     const bits = [`${ic("clock")}${fmtDur(vm.durationMs || 0)}`];
@@ -1080,7 +1192,8 @@ async function send(root) {
   ta.value = ""; ta.style.height = "auto"; S.refs = []; renderRefs();
 
   showConversation();
-  const vm = { status: "running", started: Date.now(), app, effort, engine: S.status?.ai?.mode, user: { text, images: [], files: localFiles }, steps: [], final: "", error: null, liveText: "" };
+  const here = runsHere(); // this page runs the turn (its key is kept in this browser)
+  const vm = { status: "running", started: Date.now(), app, effort, engine: currentAI().mode, user: { text, images: [], files: localFiles }, steps: [], final: "", error: null, liveText: "" };
   const v = turnView(vm, { localImages });
   $("#transcript").append(v.userEl, v.turnEl);
   scrollEnd(true);
@@ -1093,26 +1206,14 @@ async function send(root) {
   const repaint = () => { paintTurn(v); scrollEnd(); };
 
   try {
-    const res = await api("/api/turn", { method: "POST", body: { chatId: S.cur || undefined, app, effort, text, images, files }, signal: controller.signal });
-    if (!res.ok || !res.body) {
-      const j = await res.json().catch(() => ({}));
-      vm.error = { message: j.message || j.error || `Komposit answered ${res.status}.`, code: j.error === "setup_required" ? "setup_required" : null };
-      vm.status = "error";
-    } else {
-      const reader = res.body.getReader(), dec = new TextDecoder();
-      let buf = "";
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        let i;
-        while ((i = buf.indexOf("\n\n")) !== -1) {
-          const frame = buf.slice(0, i); buf = buf.slice(i + 2);
-          if (!frame.startsWith("data:")) continue;
-          let ev; try { ev = JSON.parse(frame.slice(5)); } catch { continue; }
-          onEvent(ev);
-        }
-      }
+    if (here) await runHere({ app, effort, text, images, files, controller, onEvent, vm });
+    else {
+      const res = await api("/api/turn", { method: "POST", body: { chatId: S.cur || undefined, app, effort, text, images, files }, signal: controller.signal });
+      if (!res.ok || !res.body) {
+        const j = await res.json().catch(() => ({}));
+        vm.error = { message: j.message || j.error || `Komposit answered ${res.status}.`, code: j.error === "setup_required" ? "setup_required" : null };
+        vm.status = "error";
+      } else await readEvents(res.body, onEvent);
     }
   } catch (e) {
     if (controller.signal.aborted) vm.status = "stopped";
@@ -1164,6 +1265,112 @@ async function send(root) {
       default: return;
     }
     repaint();
+  }
+}
+
+// Server-sent events from the app: one JSON object per `data:` frame.
+async function readEvents(body, onEv) {
+  const reader = body.getReader(), dec = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf("\n\n")) !== -1) {
+      const frame = buf.slice(0, i); buf = buf.slice(i + 2);
+      if (!frame.startsWith("data:")) continue;
+      let ev; try { ev = JSON.parse(frame.slice(5)); } catch { continue; }
+      onEv(ev);
+    }
+  }
+}
+
+/* A turn this page runs itself: the model is called from this browser with the
+   key kept here; every tool runs in the app (POST /api/tool), and the app
+   records the turn in the chat (POST /api/turn/start, /api/turn/record) and
+   answers with the same events it streams for a turn it runs, which onEvent
+   draws. There's no relay: if this page closes mid-turn, the turn stops. */
+async function runHere({ app, effort, text, images, files, controller, onEvent, vm }) {
+  const H = HARNESS();
+  const ai = pageAI.read();
+  const cfg = H.apiTurnConfig(ai, { gateway: H.DEFAULT_GATEWAY });
+  if (!cfg) throw new Error("No AI is set up in this browser.");
+  const start = await postJSON("/api/turn/start", { chatId: S.cur || undefined, app, effort, text, images, files, engine: ai.mode, family: cfg.family });
+  if (!start.chatId) {
+    vm.error = { message: start.message || start.error || "Komposit couldn't start this request.", code: null };
+    vm.status = "error";
+    return;
+  }
+  const { chatId, turnId } = start;
+  onEvent({ type: "start", chatId, turnId, title: start.title, app, engine: ai.mode, userImages: start.userImages });
+  (start.events || []).forEach(onEvent);
+  // A new chat is named from here (the key is here); a name the person gives it meanwhile wins.
+  if (start.isNew) {
+    H.nameChat(ai, { text, app, files: files.map((f) => f.name) }, { gateway: H.DEFAULT_GATEWAY }).then(async (title) => {
+      if (!title || title === start.title) return;
+      const r = await postJSON(`/api/chats/${chatId}/rename`, { title, ifTitle: start.title }).catch(() => null);
+      if (r?.ok) onEvent({ type: "title", chatId, title: r.title });
+    });
+  }
+
+  // The app records everything in order and answers with the events to draw.
+  // If it says the turn isn't running (stopped elsewhere, or this page went
+  // quiet too long), this page stops too.
+  let queue = Promise.resolve(), lost = false;
+  const record = (payload) => (queue = queue.then(async () => {
+    if (lost) return null;
+    try {
+      const r = await postJSON("/api/turn/record", { chatId, turnId, ...payload });
+      if (r?.error === "not_running") { lost = true; controller.abort(); return r; }
+      (r?.events || []).forEach(onEvent);
+      return r;
+    } catch { return null; }
+  }));
+  const beat = setInterval(() => record({ events: [] }), 20000); // still here, still thinking
+  // The history is append-only: send the messages from the first one that changed.
+  let synced = start.history || [];
+  const save = (messages) => {
+    let from = 0;
+    while (from < messages.length && from < synced.length && messages[from] === synced[from]) from++;
+    synced = messages.slice();
+    record({ history: { from, messages: messages.slice(from) } });
+  };
+  const emit = (ev) => {
+    if (ev.type === "text") return onEvent(ev); // live text: drawn here, not recorded
+    if (["note", "tool_run", "tool_done", "final", "error", "refusal", "aborted", "timing"].includes(ev.type)) record({ events: [ev] });
+  };
+  const stopped = { content: "Stopped by the user.", is_error: true, meta: { display: "stopped" } };
+  const runTool = async (name, input, { id }) => {
+    if (controller.signal.aborted) return stopped;
+    try {
+      const res = await api("/api/tool", { method: "POST", body: { app, name, input, chatId, turnId }, headers: { accept: "text/event-stream" }, signal: controller.signal });
+      if (res.status === 409) { lost = true; controller.abort(); return stopped; }
+      if (!res.ok || !res.body) return { content: `${name} failed: Komposit answered ${res.status}.`, is_error: true, meta: { display: `${name} error` } };
+      let result = null;
+      await readEvents(res.body, (ev) => {
+        if (ev.type === "wait") onEvent({ type: "step_wait", id, text: ev.text });
+        else if (ev.type === "result") result = ev;
+      });
+      return result ? { content: result.content, is_error: !!result.is_error, meta: result.meta || {} } : { content: `${name} failed: no result came back.`, is_error: true, meta: { display: `${name} error` } };
+    } catch {
+      if (controller.signal.aborted) return stopped;
+      return { content: `${name} failed: lost the connection to the Komposit app.`, is_error: true, meta: { display: "lost the connection" } };
+    }
+  };
+
+  try {
+    await H.runTurn({
+      app, history: start.history || [], userText: start.text, images, emit, signal: controller.signal,
+      provider: cfg.provider, creds: cfg.creds, model: cfg.model, effort, runTool, save,
+      mod: start.mod || S.status?.mod || "Cmd", maxToolCalls: start.maxToolCalls || 40,
+    });
+  } catch (e) {
+    if (!controller.signal.aborted) record({ events: [{ type: "error", message: e.message || String(e) }] });
+  } finally {
+    clearInterval(beat);
+    await record({ end: { status: controller.signal.aborted ? "stopped" : "done" } });
+    if (vm.status === "running" && controller.signal.aborted) vm.status = "stopped";
   }
 }
 

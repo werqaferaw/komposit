@@ -16,14 +16,15 @@ Windows specifics are in [windows.md](windows.md).
                           the web (optional)                         this Mac
                  ┌──────────────────────────────┐   ┌─────────────────────────────────────────────┐
  browser ───────▶│ app.komposit.werq.dev        │   │ Komposit.app (menu bar)                      │
-   │             │   static UI (web/ Worker)    │   │   └─ node  companion/server.mjs  :4321        │
-   │             └──────────────────────────────┘   │        ├─ UI served locally too  (ui/)       │
-   │  fetch http://127.0.0.1:4321 (token)           │        ├─ engines: Claude Code | Codex | API │
-   └───────────────────────────────────────────────▶│        ├─ tools → bridges → platform/        │
-                                                    │        └─ chats + settings on disk           │
-                                                    └──────────────┬──────────────────────────────┘
-                                                                   │ AppleScript (Mac) · COM / AfterFX.exe (Windows)
-                                                         Illustrator · Photoshop · After Effects
+   │             │   UI + the agent loop        │   │   └─ node  companion/server.mjs  :4321        │
+   │             │   (web/ Worker, harness.js)  │   │        ├─ UI served locally too  (ui/)       │
+   │             └──────────────┬───────────────┘   │        ├─ engines: Claude Code | Codex | API │
+   │   model APIs, straight from │ the browser      │        ├─ tools → bridges → platform/        │
+   │   (key kept in the browser) ▼                  │        │   (POST /api/tool for the page)     │
+   │          Anthropic · Gemini · OpenRouter ·     │        └─ chats + settings on disk           │
+   │          OpenAI · gateway (invites)            └──────────────┬──────────────────────────────┘
+   │  fetch http://127.0.0.1:4321 (token)                          │ AppleScript (Mac) · COM / AfterFX.exe (Windows)
+   └──────────────────────────────────────────────────▶ the app  Illustrator · Photoshop · After Effects
 
  AI, chosen per Mac:  Claude Code (Claude plan) · Codex (ChatGPT plan) · Anthropic key · Gemini key ·
                       OpenAI-compatible key · invite code ──▶ gateway.komposit.werq.dev (gateway/ Worker, owner's key)
@@ -34,8 +35,15 @@ Windows specifics are in [windows.md](windows.md).
   files are on that computer. Everything that differs between macOS and Windows
   is in `companion/platform/` (section 8).
 - **The web half** is a static page plus an invite gateway. The page holds no
-  data; it talks straight to the local half. The gateway holds the owner's
+  data; it talks straight to the local half. With an API key kept in the
+  browser, the page runs the agent loop itself (the same harness as the local
+  server, bundled) and calls the model from the browser; the app then only runs
+  the tools and records the chat (section 3). The gateway holds the owner's
   Anthropic key for invited testers.
+- **Where a turn runs:** the local page always uses the local server's loop
+  (Safari, offline, nothing on the web). The hosted page runs the loop in the
+  tab when its AI is a key kept in the browser; subscriptions (Claude Code,
+  Codex), custom service addresses and keys saved in the app run in the app.
 
 ---
 
@@ -78,8 +86,10 @@ missing token 401, form POST 415, path traversal 404.
 | `GET /api/workspace` · `/api/files?dir=` · `/api/thumb?path=` | running apps, recent files, folder tree, previews |
 | `POST /api/new` · `/api/open` | new document · open a file in its app |
 | `GET /api/chats` · `GET|DELETE /api/chats/:id` · `POST /api/chats/:id/rename` · `GET /api/chats/:id/img/:name` | chat history and its images |
-| `POST /api/turn` | run one turn; SSE stream |
-| `POST /api/stop` | stop a chat's running turn |
+| `POST /api/turn` | run one turn here; SSE stream |
+| `POST /api/stop` | stop a chat's running turn (here or in the page) |
+| `POST /api/tool` | run one tool call for the page's loop: `{app, name, input[, chatId, turnId]}` → `{content, is_error, meta}`; with `Accept: text/event-stream`, `wait` events (a dialog is up) then the result |
+| `POST /api/turn/start` · `POST /api/turn/record` | a turn the page runs: start saves the message and attachments, reads the selection and returns the history; record takes the page's events, the new tail of the history and the outcome, and answers with the normalized events to draw |
 
 ### Settings: `companion/config.mjs`
 
@@ -131,6 +141,21 @@ UI ── POST /api/turn {chatId?, app, effort, text, images} ─▶ server
                                                          └─ anthropic | invite | gemini | openai → harness/loop.mjs
 UI ◀─ SSE: start · note · text · step · step_done · final · error · done ──┘
 ```
+
+A turn the hosted page runs (an API key kept in the browser):
+
+```
+page ── POST /api/turn/start ──▶ app: chat + message saved, selection read, history back
+  │  loop (harness/core/loop.mjs, bundled in web/harness.js)
+  ├──▶ model API, from the browser (Anthropic SDK in browser mode, or fetch)
+  ├──▶ POST /api/tool  ──▶ app: the tool runs (validation, dialog notice, incident log)
+  └──▶ POST /api/turn/record (events, history tail, end) ──▶ app: recorded like any turn,
+                                                            answers with the events to draw
+```
+
+The page sends a heartbeat every 20 s; a turn with no word from its page for
+90 s ends as stopped (the tab was closed; there's no relay to carry it on),
+and the chat says so. `/api/stop` from anywhere ends it at once.
 
 The server normalizes both engines' events (`labels.mjs` turns `inspect` into
 "Looking at the document" and so on), records them on the turn, saves renders as
@@ -192,6 +217,16 @@ prompt on stdin. Checked against codex-cli 0.167.0.
   an `mcp_tool_call` item.
 
 ### API engine: `harness/loop.mjs` + `providers/`
+
+The loop, the tool schemas, the prompts and chat naming live in
+`harness/core/` and `providers/` with no Node APIs (the modifier key, Cmd or
+Ctrl, is a parameter; tools run through a `runTool` function). The local server
+wraps them for this computer (`harness/loop.mjs`, `harness/tools.mjs`,
+`harness/system.mjs`); `web/build.mjs` bundles the same files for the page
+(esbuild, platform browser, so a Node API anywhere is a build error).
+`providers/choose.mjs` picks provider, credentials and model for an API AI;
+`providers/keys.mjs` checks keys; `net.mjs` lets the local server wait up to
+20 minutes for a slow model to start answering (Node's fetch gives up at 300 s).
 
 - **`anthropic.mjs`** (official SDK `@anthropic-ai/sdk` 1.3.0, API version
   2026-10-21) calls `claude-opus-5-5` with:
@@ -368,9 +403,12 @@ the first real-PC test: [windows-testing.md](windows-testing.md).
 
 ## 6. The web: `web/` and `gateway/` (Cloudflare Workers)
 
-- **`web/`** serves `ui/` (built into `web/public` by `web/build.mjs`, which swaps
-  the token slot for the download link). Its CSP allows connections only to the
-  site itself and `127.0.0.1` / `localhost`. Deploy: `cd web && npm run deploy`.
+- **`web/`** serves `ui/` plus `harness.js` (built into `web/public` by
+  `web/build.mjs`, which bundles `web/harness.mjs` and swaps the token slot for
+  the download link). Its CSP allows scripts only from the site itself and
+  connections only to the site, `127.0.0.1` / `localhost`, and the AI services
+  the page may call with a key kept in the browser (Anthropic, Gemini,
+  OpenRouter, OpenAI, the gateway). Deploy: `cd web && npm run deploy`.
 - **`gateway/`** is an Anthropic-compatible `/v1/messages` proxy.
   - **Auth:** the invite code is the API key (`x-api-key` or bearer). Codes are stored as SHA-256 hashes in KV.
   - **Limits:** a per-invite daily request limit and a monthly output-token limit.
@@ -389,6 +427,7 @@ the first real-PC test: [windows-testing.md](windows-testing.md).
 | `npm test` | API engine: request shape (Opus 5.5, betas, fallbacks, effort, caching, eager tools), parsing, append-only history across turns and app switches, refusals, invalid tool input; tools, selection, attachments; incident log; the Windows platform layer (`win.test.mjs`); chat titles; Gemini (signatures round trip, key check, titles); OpenAI-compatible provider; the Codex engine (`codex.test.mjs`: recorded `codex exec --json` streams, the command line, status, broken installs, Stop, titles, through a fake `codex`) |
 | `npm run test:live [-- app]` | the above plus live checks: Illustrator export/save/preflight/selection, Photoshop inspect, After Effects selection/frames/preview/MP4 |
 | `cd gateway && npm test` | the invite gateway against a mock Anthropic |
+| `npm test` (also) | the bridge API for the page (`bridge-api.test.mjs`: `/api/tool` behind all four locks, page-run turns recorded, the lease); the page's bundle in a bare browser-like context with no Node globals (`page-harness.test.mjs`, needs `web/`'s esbuild) |
 | `npm run check` | syntax of every module, the UI and the build scripts |
 | `packaging/verify-dmg.sh` | a built DMG matches the checkout, universal, signed, the right hosted URL |
 | `node packaging/windows/smoke.mjs` (CI) | the Windows build on a PC without Adobe: helper, platform layer, server and its locks, tray self-test, install/uninstall |
@@ -425,10 +464,12 @@ companion/
   desktop.mjs       running apps, recent files, folder tree, thumbnails (async)
   preview.mjs       render open docs for cards; busy guard
   env.mjs           .env loader (checkouts only)
+  net.mjs           lets this process wait for slow model replies (Node's fetch pool, longer timeouts)
   engines/          index.mjs (router, effort map) · cli.mjs (Claude Code) · codex.mjs (Codex)
-  harness/          loop.mjs · tools.mjs · system.mjs · behavior.mjs · guidance.mjs · context.mjs (live selection)
-                    · attachments.mjs
-  providers/        anthropic.mjs (SDK) · openai.mjs · index.mjs
+  harness/          core/ (loop · tools · system · behavior · naming: no Node APIs, also bundled for the page)
+                    · loop.mjs · tools.mjs · system.mjs · behavior.mjs (this computer's wrappers) · guidance.mjs
+                    · context.mjs (live selection) · attachments.mjs
+  providers/        anthropic.mjs (SDK) · openai.mjs · choose.mjs (provider for an AI) · keys.mjs (key checks) · index.mjs
   mcp/doc-server.mjs  Komposit tools over MCP (stdio)
   bridges/          extendscript.mjs (envelope, transport via platform/) · illustrator · photoshop · aftereffects
                     · files.mjs (export paths)
@@ -441,7 +482,7 @@ packaging/          build-mac.sh · release-mac.sh · verify-dmg.sh · publish-r
 scripts/            check.mjs · test-live.mjs (cross-platform npm scripts)
 .github/workflows/  test.yml (unit tests on every push and pull request)
                     · windows.yml (tests, build, smoke tests, installer artifact)
-web/                Cloudflare Worker for the hosted UI
+web/                Cloudflare Worker for the hosted UI · harness.mjs (the page's agent loop) · build.mjs (bundle + UI)
 gateway/            Cloudflare Worker: invite gateway
 brand/              logo files from the spec (04.C solid tile, wordmark, lockup) · README
 docs/               architecture.md (this) · getting-started.md · windows.md · windows-testing.md

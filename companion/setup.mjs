@@ -251,10 +251,24 @@ export function markOnboarded(done = true) {
   return { ok: true };
 }
 
+// Is the invite service up? Invites are only offered when it answers (or one
+// is saved), so nobody is sent to a dead end. Checked at most once a minute.
+let _gateway = { at: 0, up: null };
+export async function gatewayUp({ fresh = false } = {}) {
+  if (!fresh && _gateway.up !== null && Date.now() - _gateway.at < 60000) return _gateway.up;
+  let up = false;
+  try {
+    const r = await fetch(`${DEFAULT_GATEWAY.replace(/\/+$/, "")}/health`, { signal: AbortSignal.timeout(3000) });
+    up = r.ok;
+  } catch {}
+  _gateway = { at: Date.now(), up };
+  return up;
+}
+
 // Everything the setup screens need, in one call.
 export async function setupStatus({ fresh = false } = {}) {
   const codex = codexStatus({ fresh }); // alongside the checks below
-  const [apps, files, claude] = await Promise.all([appsStatus(), filesStatus(), claudeStatus({ fresh })]);
+  const [apps, files, claude, gateway] = await Promise.all([appsStatus(), filesStatus(), claudeStatus({ fresh }), gatewayUp({ fresh })]);
   return {
     apps,
     files,
@@ -264,6 +278,7 @@ export async function setupStatus({ fresh = false } = {}) {
     onboarded: !!config().onboarded,
     helper: !!(await helperPath()),
     presets: OPENAI_PRESETS,
+    gatewayUp: gateway,
     gemini: { models: GEMINI.models },
   };
 }
