@@ -87,7 +87,6 @@ const P = {
   mic: '<path d="M7 6.5C7 4.01472 9.01472 2 11.5 2C13.9853 2 16 4.01472 16 6.5V11.5C16 13.9853 13.9853 16 11.5 16C9.01472 16 7 13.9853 7 11.5V6.5Z"/><path d="M11.5 19H11.0828C7.57267 19 4.57706 16.4623 4 13M11.5 19H11.9172C15.4273 19 18.4229 16.4623 19 13M11.5 19V22"/>',
   lock: '<path d="M12 14.5V17.5M13 14.5C13 15.0523 12.5523 15.5 12 15.5C11.4477 15.5 11 15.0523 11 14.5C11 13.9477 11.4477 13.5 12 13.5C12.5523 13.5 13 13.9477 13 14.5Z"/><path d="M16.5 9V6.5C16.5 4.01472 14.4853 2 12 2C9.51471 2 7.49999 4.01472 7.49999 6.5V9"/><path d="M4.2678 18.8447C4.49268 20.515 5.87612 21.8235 7.55965 21.9009C8.97627 21.966 10.4153 22 12 22C13.5847 22 15.0237 21.966 16.4403 21.9009C18.1239 21.8235 19.5073 20.515 19.7322 18.8447C19.8789 17.7547 20 16.6376 20 15.5C20 14.3624 19.8789 13.2453 19.7322 12.1553C19.5073 10.485 18.1239 9.17649 16.4403 9.09909C15.0237 9.03397 13.5847 9 12 9C10.4153 9 8.97627 9.03397 7.55965 9.09909C5.87612 9.17649 4.49268 10.485 4.2678 12.1553C4.12104 13.2453 3.99999 14.3624 3.99999 15.5C3.99999 16.6376 4.12104 17.7547 4.2678 18.8447Z"/>',
   download: '<path d="M2.99969 17.0002C2.99969 17.9302 2.99969 18.3952 3.10192 18.7767C3.37932 19.8119 4.18796 20.6206 5.22324 20.898C5.60474 21.0002 6.06972 21.0002 6.99969 21.0002L16.9997 21.0002C17.9297 21.0002 18.3947 21.0002 18.7762 20.898C19.8114 20.6206 20.6201 19.8119 20.8975 18.7767C20.9997 18.3952 20.9997 17.9302 20.9997 17.0002"/><path d="M16.4998 11.5002C16.4998 11.5002 13.1856 16.0002 11.9997 16.0002C10.8139 16.0002 7.49976 11.5002 7.49976 11.5002M11.9997 15.0002V3.00016"/>',
-  google: '<circle cx="12" cy="12" r="10"/><path d="M12 12H17C17 14.7614 14.7614 17 12 17C9.23858 17 7 14.7614 7 12C7 9.23858 9.23858 7 12 7C13.3807 7 14.6307 7.55964 15.5355 8.46447"/>',
   user: '<path d="M18.4984 19.1511C17.3377 17.4018 15.2947 16.2009 12.9313 16.0569L11.9984 16C11.6652 16.0083 11.3547 16.0194 11.0617 16.0325C8.71722 16.1376 6.66598 17.3796 5.5 19.1511"/><path d="M14.9961 10C14.9961 11.6569 13.6529 13 11.9961 13C10.3392 13 8.99609 11.6569 8.99609 10C8.99609 8.34315 10.3392 7 11.9961 7C13.6529 7 14.9961 8.34315 14.9961 10Z"/><path d="M22 12C22 17.5228 17.5228 22 12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C17.5228 2 22 6.47715 22 12Z"/>',
   stopped: '<circle cx="12" cy="12" r="10"/><path d="M9.38886 15.1629C9.89331 15.5 10.5955 15.5 12 15.5C13.4045 15.5 14.1067 15.5 14.6111 15.1629C14.8295 15.017 15.017 14.8295 15.1629 14.6111C15.5 14.1067 15.5 13.4045 15.5 12C15.5 10.5955 15.5 9.89331 15.1629 9.38886C15.017 9.17048 14.8295 8.98298 14.6111 8.83706C14.1067 8.5 13.4045 8.5 12 8.5C10.5955 8.5 9.89331 8.5 9.38886 8.83706C9.17048 8.98298 8.98298 9.17048 8.83706 9.38886C8.5 9.89331 8.5 10.5955 8.5 12C8.5 13.4045 8.5 14.1067 8.83706 14.6111C8.98298 14.8295 9.17048 15.017 9.38886 15.1629Z"/>',
 };
@@ -101,6 +100,9 @@ const APPMARK = {
 };
 const appMark = (id) => APPMARK[id] ? `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="${APPMARK[id]}"/></svg>` : "";
 const ic = (n) => `<span class="ic">${svg(n)}</span>`;
+// Google's "G" in its own colours, as Google's sign-in branding guidelines ask
+// for on a Sign in with Google button (developers.google.com/identity/branding-guidelines).
+const GMARK = '<span class="ic gmark"><svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg></span>';
 function paintIcons(root = document) { $$("[data-icon]", root).forEach((n) => { n.innerHTML = svg(n.dataset.icon); }); }
 
 const CODE = { illustrator: "Ai", photoshop: "Ps", aftereffects: "Ae" };
@@ -422,7 +424,7 @@ function showSignIn(note = "") {
   box.innerHTML = `<h3>Sign in to continue<button class="iconbtn" id="si-close" aria-label="Close">${ic("close")}</button></h3>
     <p class="muted">Komposit on the web asks you to sign in with Google before your first request. It's free. From Google, Komposit keeps only your account id, email and name.</p>
     <div class="err-text" id="si-err">${esc(note)}</div>
-    <div class="actions" style="justify-content:flex-start"><button class="btn primary" id="si-go">${ic("google")} Sign in with Google</button></div>
+    <div class="actions" style="justify-content:flex-start"><button class="btn primary" id="si-go">${GMARK} Sign in with Google</button></div>
     <p class="gate-foot">Rather not sign in? The app's own page works without an account: <a href="${localCopyURL(K.port)}">open it</a>. <a href="https://komposit.werq.dev/privacy" target="_blank" rel="noopener">Privacy</a></p>`;
   $("#si-close", box).onclick = () => m.classList.remove("on");
   $("#si-go", box).onclick = startSignIn;
@@ -441,7 +443,7 @@ function renderAccount() {
     box.innerHTML = `<button class="acct in" id="acct-open" title="Your account">${ic("user")}<span class="nm">${esc(a.name || a.email || "Signed in")}</span></button>`;
     $("#acct-open", box).onclick = () => openSettings("account");
   } else {
-    box.innerHTML = `<button class="acct" id="acct-in">${ic("google")}<span class="nm">Sign in with Google</span></button>`;
+    box.innerHTML = `<button class="acct" id="acct-in">${GMARK}<span class="nm">Sign in with Google</span></button>`;
     $("#acct-in", box).onclick = () => showSignIn();
   }
 }
@@ -846,7 +848,7 @@ function accountPanel(box) {
   const a = account.read();
   if (!a?.session) {
     box.innerHTML = `<div class="muted">Komposit on the web asks you to sign in with Google before your first request. From Google, it keeps only your account id, email and name. <a href="https://komposit.werq.dev/privacy" target="_blank" rel="noopener">Privacy</a></div>
-      <div class="actions" style="justify-content:flex-start;margin-top:10px"><button class="btn small primary" id="a-in">${ic("google")} Sign in with Google</button></div>`;
+      <div class="actions" style="justify-content:flex-start;margin-top:10px"><button class="btn small primary" id="a-in">${GMARK} Sign in with Google</button></div>`;
     paintIcons(box);
     $("#a-in", box).onclick = startSignIn;
     return;
