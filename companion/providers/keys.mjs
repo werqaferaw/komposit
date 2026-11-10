@@ -3,7 +3,7 @@
 // person saves in the app, and the web page checks keys it keeps in the
 // browser, the same way.
 import Anthropic from "@anthropic-ai/sdk";
-import { GEMINI } from "./openai.mjs";
+import { GEMINI, quotaKind } from "./openai.mjs";
 import { DEFAULT_GATEWAY } from "./choose.mjs";
 
 const IN_BROWSER = typeof window !== "undefined" && typeof document !== "undefined";
@@ -73,14 +73,19 @@ export async function checkGeminiKey(apiKey, { model = "", baseUrl = GEMINI.base
   if (want && ids.length && !has(want)) return { ok: false, error: `This key can't use ${want}. Leave the model empty to use the best one available.` };
 
   // The first candidate the key really may call (listed is not enough: a key
-  // without billing lists models it has no quota for).
+  // without billing lists models it has no quota for). Each model is asked once.
+  const asked = new Map();
+  const answers = async (id) => {
+    if (!asked.has(id)) asked.set(id, await probe(apiKey, id, baseUrl));
+    return asked.get(id);
+  };
   const first = async (list) => {
-    for (const id of list) if ((await probe(apiKey, id, baseUrl)).usable) return id;
+    for (const id of list) if ((await answers(id)).usable) return id;
     return null;
   };
   let chosen = want;
   if (want) {
-    const p = await probe(apiKey, want, baseUrl);
+    const p = await answers(want);
     if (!p.usable) return { ok: false, error: `This key can't use ${want} right now${p.quota ? " (no quota: Pro-class models need billing turned on in Google AI Studio)" : ""}. Leave the model empty to use the best one it can.` };
   } else {
     const listed = [...GEMINI.models.filter(has), ...[newestListed(ids)].filter((id) => id && !GEMINI.models.includes(id))];
@@ -110,7 +115,9 @@ export async function modelAnswers(apiKey, model, baseUrl = GEMINI.baseUrl, { wa
     ]);
     if (!res) return { usable: true, status: null };
     const detail = res.ok ? "" : await res.text().catch(() => "");
-    return { usable: res.ok, status: res.status, quota: res.status === 429 && /quota|RESOURCE_EXHAUSTED|billing/i.test(detail) };
+    const kind = res.status === 429 ? quotaKind(detail) : null;
+    // A per-minute limit means the key may use the model, just not this second.
+    return { usable: res.ok || kind === "minute", status: res.status, quota: kind === "none" || kind === "day" };
   } catch (e) {
     return { usable: false, status: 0 };
   } finally {

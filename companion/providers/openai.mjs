@@ -308,9 +308,11 @@ export function explainError(e) {
   if (status === 401 || status === 403 || /api key not valid|invalid api key|incorrect api key|API_KEY_INVALID/i.test(detail)) {
     return { message: "The API key was not accepted by the AI service. Check it in Settings.", code: "auth" };
   }
-  if (status === 429 && /quota|RESOURCE_EXHAUSTED|billing/i.test(detail)) {
-    return { message: "This key has no quota left for this model. Check its plan or billing with the AI service, or save the key again in Settings to switch to a model it can use.", code: "quota" };
+  const limit = status === 429 ? quotaKind(detail) : null;
+  if (limit === "none") {
+    return { message: "This key has no quota for this model. Check its plan or billing with the AI service, or save the key again in Settings to switch to a model it can use.", code: "quota" };
   }
+  if (limit === "day") return { message: "This key has used up today's quota for this model. Try again tomorrow, or check its plan or billing with the AI service.", code: "quota" };
   if (status === 429) return { message: "The AI service is rate limiting this key. Wait a moment and try again.", code: "rate_limit" };
   if ((status === 503 || status === 529) && /demand|overload|unavailable/i.test(detail)) {
     return { message: "The model is overloaded right now (high demand). Try again in a minute.", code: "overloaded" };
@@ -347,16 +349,36 @@ async function postRetrying(post, payload, { signal, onEvent }) {
   for (const base of RETRY_WAITS) {
     if (!RETRY_STATUS.has(res.status) && res.status !== 429) return res;
     const detail = await res.text().catch(() => "");
-    if (res.status === 429 && /quota|RESOURCE_EXHAUSTED|billing/i.test(detail)) {
+    const kind = res.status === 429 ? quotaKind(detail) : null;
+    if (kind === "none" || kind === "day") {
+      // Waiting won't help: no quota at all for this model, or today's is used up.
       throw Object.assign(new Error(`Model request failed (429): ${detail.slice(0, 500)}`), { status: 429, detail });
     }
     const after = Number(res.headers.get("retry-after"));
-    const wait = Number.isFinite(after) && after > 0 ? Math.min(after * 1000, 30000) : base + Math.floor(Math.random() * 500);
+    const hinted = retryDelayMs(detail); // Google says how long in the body
+    const wait = hinted !== null ? Math.min(hinted + 500, 65000) : Number.isFinite(after) && after > 0 ? Math.min(after * 1000, 30000) : base + Math.floor(Math.random() * 500);
     onEvent({ type: "warning", message: `the service answered ${res.status}; trying again in ${Math.round(wait / 1000)} s` });
     await pause(wait, signal);
     res = await post(payload);
   }
   return res;
+}
+
+// What a 429 is about: "none" (this key has no quota for the model at all,
+// e.g. a Pro model without billing: "limit: 0"), "day" (today's is used up),
+// "minute" (a rate limit: try again shortly), or null (no quota words).
+export function quotaKind(detail = "") {
+  const d = String(detail);
+  if (!/quota|RESOURCE_EXHAUSTED|billing|rate.?limit/i.test(d)) return null;
+  if (/limit:\s*0\b|"quotaValue":\s*"0"/i.test(d)) return "none";
+  if (/PerDay|per day|daily/i.test(d)) return "day";
+  return "minute";
+}
+
+// Google's RetryInfo ("retryDelay": "34s") in milliseconds, or null.
+function retryDelayMs(detail = "") {
+  const m = /"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/.exec(String(detail));
+  return m ? Math.round(Number(m[1]) * 1000) : null;
 }
 
 function pause(ms, signal) {

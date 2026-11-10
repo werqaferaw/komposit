@@ -84,8 +84,14 @@ const server = createServer(async (req, res) => {
     return res.end(JSON.stringify([{ error: { code: 503, message: "This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.", status: "UNAVAILABLE" } }]));
   }
   if (name === "quota429") {
+    // No quota at all for this model (a Pro model on a key without billing).
     res.writeHead(429, { "content-type": "application/json" });
-    return res.end(JSON.stringify([{ error: { code: 429, message: "You exceeded your current quota, please check your plan and billing details.", status: "RESOURCE_EXHAUSTED" } }]));
+    return res.end(JSON.stringify([{ error: { code: 429, message: "You exceeded your current quota, please check your plan and billing details. Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 0, model: gemini-4-argon", status: "RESOURCE_EXHAUSTED" } }]));
+  }
+  if (name === "rpm429") {
+    // A per-minute limit, with Google's hint of how long to wait.
+    res.writeHead(429, { "content-type": "application/json" });
+    return res.end(JSON.stringify([{ error: { code: 429, message: "You exceeded your current quota. Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 10, model: gemini-3.8-flash", status: "RESOURCE_EXHAUSTED", details: [{ "@type": "type.googleapis.com/google.rpc.QuotaFailure", violations: [{ quotaId: "GenerateRequestsPerMinutePerProjectPerModel-FreeTier" }] }, { "@type": "type.googleapis.com/google.rpc.RetryInfo", retryDelay: "0.01s" }] } }]));
   }
   res.writeHead(200, { "content-type": "text/event-stream" });
   for (const c of REPLIES[name] || []) res.write(frame(c));
@@ -221,6 +227,13 @@ test("a busy model (503, high demand) is tried again; a quota refusal is not", a
   assert.equal(r.content.find((b) => b.type === "text").text, "Renamed the first layer to Hi.");
   assert.equal(events.filter((e) => e.type === "warning").length, 2);
 
+  // A per-minute limit is waited out (Google's retryDelay), then the answer arrives.
+  script = ["rpm429", "final"];
+  const k = seen.length;
+  const r2 = await openai.stream({ system: "sys", messages: [{ role: "user", content: "hi" }], model: "gemini-3.8-flash", creds: CREDS });
+  assert.equal(seen.length - k, 2);
+  assert.ok(r2.content.some((b) => b.type === "text"));
+
   script = ["quota429", "final"];
   const m = seen.length;
   const err = await openai.stream({ system: "sys", messages: [{ role: "user", content: "hi" }], model: "gemini-4-argon", creds: CREDS }).then(() => null, (e) => e);
@@ -315,16 +328,23 @@ test("a model check stops at the first sign of an answer and reads quota refusal
     };
     assert.deepEqual(await modelAnswers("k", "gemini-3.8-flash", BASE), { usable: true, status: 200, quota: false });
     assert.ok(aborted, "the reply is stopped after the check");
-    globalThis.fetch = async () => new Response(JSON.stringify([{ error: { code: 429, message: "You exceeded your current quota", status: "RESOURCE_EXHAUSTED" } }]), { status: 429 });
+    globalThis.fetch = async () => new Response(JSON.stringify([{ error: { code: 429, message: "You exceeded your current quota. limit: 0, model: gemini-4-argon", status: "RESOURCE_EXHAUSTED" } }]), { status: 429 });
     assert.deepEqual(await modelAnswers("k", "gemini-4-argon", BASE), { usable: false, status: 429, quota: true });
+    // Only rate-limited this minute: the model is still one the key can use.
+    globalThis.fetch = async () => new Response(JSON.stringify([{ error: { code: 429, message: "You exceeded your current quota. limit: 10. GenerateRequestsPerMinutePerProjectPerModel-FreeTier", status: "RESOURCE_EXHAUSTED" } }]), { status: 429 });
+    assert.deepEqual(await modelAnswers("k", "gemini-3.8-flash", BASE), { usable: true, status: 429, quota: false });
     // Still thinking after the wait: no refusal came, so it's usable.
     globalThis.fetch = (url, init) => new Promise((_, rej) => init.signal.addEventListener("abort", () => rej(new Error("aborted"))));
     assert.deepEqual(await modelAnswers("k", "gemini-4-argon", BASE, { waitMs: 50 }), { usable: true, status: null });
   } finally {
     globalThis.fetch = real;
   }
-  const quota = Object.assign(new Error("Model request failed (429)"), { status: 429, detail: "RESOURCE_EXHAUSTED: quota" });
-  assert.equal(openai.explainError(quota).code, "quota");
+  const none = Object.assign(new Error("Model request failed (429)"), { status: 429, detail: "RESOURCE_EXHAUSTED: quota exceeded, limit: 0" });
+  assert.equal(openai.explainError(none).code, "quota");
+  const day = Object.assign(new Error("Model request failed (429)"), { status: 429, detail: "RESOURCE_EXHAUSTED quota GenerateRequestsPerDayPerProjectPerModel" });
+  assert.match(openai.explainError(day).message, /today's quota/);
+  const minute = Object.assign(new Error("Model request failed (429)"), { status: 429, detail: "RESOURCE_EXHAUSTED quota PerMinute" });
+  assert.equal(openai.explainError(minute).code, "rate_limit");
 });
 
 test("chat titles go to Google with the fast model and little thinking", async () => {
