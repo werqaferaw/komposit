@@ -44,8 +44,11 @@ function clientFor({ apiKey, baseUrl } = {}) {
 
 // Turn SDK errors into one plain sentence for the person using the app.
 export function explainError(e) {
-  if (e instanceof Anthropic.AuthenticationError) return { message: "The API key or invite code was not accepted.", code: "auth" };
-  if (e instanceof Anthropic.PermissionDeniedError) return { message: "This key has no access to that model.", code: "permission" };
+  // The invite gateway explains its own refusals (a sign-in that ended, an
+  // account with no allowance yet): pass its sentence on.
+  const said = String(e?.error?.error?.message || "");
+  if (e instanceof Anthropic.AuthenticationError) return { message: /sign in|sign-in|invite/i.test(said) ? said : "The API key or invite code was not accepted.", code: "auth" };
+  if (e instanceof Anthropic.PermissionDeniedError) return { message: /allowance|account|invite/i.test(said) ? said : "This key has no access to that model.", code: "permission" };
   if (e instanceof Anthropic.RateLimitError) {
     const msg = e.error?.error?.message || "";
     return { message: msg && /invite|limit/i.test(msg) ? msg : "Rate limited. Wait a moment and try again.", code: "rate_limit" };

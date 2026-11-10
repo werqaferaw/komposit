@@ -312,7 +312,7 @@ export function explainError(e) {
   if (limit === "none") {
     return { message: "This key has no quota for this model. Check its plan or billing with the AI service, or save the key again in Settings to switch to a model it can use.", code: "quota" };
   }
-  if (limit === "day") return { message: "This key has used up today's quota for this model. Try again tomorrow, or check its plan or billing with the AI service.", code: "quota" };
+  if (limit === "day") return { message: "This key has used up today's quota for this model. Save the key again in Settings to switch to a model that still has some, try again tomorrow, or check its plan or billing with the AI service.", code: "quota" };
   if (status === 429) return { message: "The AI service is rate limiting this key. Wait a moment and try again.", code: "rate_limit" };
   if ((status === 503 || status === 529) && /demand|overload|unavailable/i.test(detail)) {
     return { message: "The model is overloaded right now (high demand). Try again in a minute.", code: "overloaded" };
