@@ -22,10 +22,22 @@ live document and your selection, writes and runs its own ExtendScript, renders
 the result so it can see its work, checks it, and tells you what it did.
 
 <p align="center">
-  <img src="docs/media/chat.webp" alt="A Komposit chat: a request in Illustrator, the steps it took with their times, and the poster after the edit" width="49%">
-  <img src="docs/media/settings.webp" alt="Komposit Settings: the choice of AI and the Adobe apps it can work in" width="49%">
+  <img src="docs/media/request.webp" alt="Komposit taking a request in Photoshop: “Make an away-kit version of this poster: turn everything that's red into yellow.” Its steps appear one by one, each with a small render of the document, and the poster comes back yellow." width="100%">
 </p>
-<p align="center"><sub>Real sessions. Watch one, or click through a recording, on <a href="https://komposit.werq.dev">the website</a>.</sub></p>
+
+<table>
+  <tr>
+    <td width="33%"><img src="docs/media/photoshop.webp" alt="The poster in Photoshop: red, then yellow with two duller lines after the first pass, then all three lines matched." width="100%"></td>
+    <td width="33%"><img src="docs/media/after-effects.webp" alt="The preview Komposit rendered in After Effects: NORTH, LONDON and FOREVER each start bigger and snap down to size as they land." width="100%"></td>
+    <td width="33%"><img src="docs/media/illustrator.webp" alt="The poster as a reference, then its title rebuilt in Illustrator as red vector type on charcoal." width="100%"></td>
+  </tr>
+  <tr>
+    <td valign="top"><b>Photoshop.</b> “Turn everything that's red into yellow.” It rendered its first pass, saw two lines had come out duller, and fixed them before it answered.</td>
+    <td valign="top"><b>After Effects.</b> “Make NORTH, LONDON and FOREVER punch in as they land.” It set the keyframes and rendered this preview.</td>
+    <td valign="top"><b>Illustrator.</b> “Rebuild this poster's title as vectors.” Built from the poster, attached as a reference.</td>
+  </tr>
+</table>
+<p align="center"><sub>Real sessions on one poster, recorded in the app. Replay them step by step on <a href="https://komposit.werq.dev">the website</a>.</sub></p>
 
 - **Live, not generated.** It edits your real file: layers, artboards, type,
   keyframes. Every change is in the app's undo history, and it saves only when
