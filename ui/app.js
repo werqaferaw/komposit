@@ -507,7 +507,7 @@ function aiChooser(box, setup, { saveLabel = "Save", onSaved } = {}) {
     { id: "gemini", t: "Google Gemini API key", d: "Pay as you go with a key from Google AI Studio. Runs the best Gemini model your key can use." },
     { id: "openai", t: "OpenRouter or another OpenAI-compatible service", d: "Use a key from OpenRouter, OpenAI, or a compatible service." },
     { id: "invite", t: "Invite code", d: "Got a code from Komposit? Use it instead of your own AI account." },
-    { id: "account", t: "Komposit account", d: "Sign in with Google and use the allowance Komposit gave your account. No key or code." },
+    { id: "account", t: "Komposit account", d: "If Komposit has granted you an allowance, sign in with Google to use it. No key or code." },
   ].filter((o) => (o.id !== "invite" || inviteOK) && (o.id !== "account" || (here && ((gw.up && gw.signIn) || mine?.account?.signedIn))));
   if (!OPTIONS.some((o) => o.id === pick)) pick = OPTIONS[0].id;
   function body(id) {
@@ -567,7 +567,7 @@ function aiChooser(box, setup, { saveLabel = "Save", onSaved } = {}) {
       const acc = mine?.account || {};
       if (!acc.signedIn) return `<div class="muted">Optional. Everything else works without an account.</div>
         <div><button class="btn small primary" data-signin>Sign in with Google</button></div>
-        <div class="muted">Komposit keeps only your Google account id, email and name. <a href="https://komposit.werq.dev/privacy" target="_blank" rel="noopener">Privacy</a></div>`;
+        <div class="muted">From Google, Komposit keeps only your account id, email and name. <a href="https://komposit.werq.dev/privacy" target="_blank" rel="noopener">Privacy</a></div>`;
       return `<div class="status-line ok">${ic("checkCircle")}<span>Signed in${acc.name || acc.email ? ` as ${esc(acc.name || acc.email)}` : ""}.</span></div>
         <div class="muted" id="f-acct">Checking your allowance</div>
         <div class="actions" style="justify-content:flex-start"><button class="btn small" data-signout>Sign out</button><button class="btn small" data-delacct>Delete account</button></div>`;
@@ -609,7 +609,7 @@ function aiChooser(box, setup, { saveLabel = "Save", onSaved } = {}) {
       const me = r.json || {};
       const v = pageAI.read();
       if (v.account && (me.name || me.email)) { v.account.name = me.name || null; v.account.email = me.email || null; pageAI.write(v); renderEngine(); }
-      acct.textContent = r.status === 200 ? (me.allowance > 0 ? "Your account has an allowance from Komposit." : "No allowance yet. Komposit grants them one by one; you'll be able to use it once yours is in.") : "Couldn't reach the account service just now.";
+      acct.textContent = r.status === 200 ? (me.allowance > 0 ? "Your account has an allowance from Komposit." : "No allowance on this account. Komposit grants them by invitation; until then, choose another option above.") : "Couldn't reach the account service just now.";
     });
     const rcx = $("[data-recheck-codex]", box);
     if (rcx) rcx.onclick = async () => { rcx.disabled = true; const s = await getJSON("/api/setup?fresh=1"); Object.assign(cx, s.codex || {}); render(); };
@@ -1062,7 +1062,7 @@ function renderHistory() {
     x.onclick = async (e) => {
       e.stopPropagation();
       if (x.dataset.armed !== "1") { x.dataset.armed = "1"; x.innerHTML = `<span style="font-size:11px;font-family:var(--mono)">Delete?</span>`; setTimeout(() => { if (x.isConnected) { x.dataset.armed = ""; x.innerHTML = ic("x"); } }, 2500); return; }
-      await api(`/api/chats/${c.id}`, { method: "DELETE" }).catch(() => {});
+      await api(`/api/chats/${c.id}`, { method: "DELETE", body: {} }).catch(() => {}); // JSON, like every write
       if (S.cur === c.id) newChat(); else loadChats();
     };
     row.append(x);

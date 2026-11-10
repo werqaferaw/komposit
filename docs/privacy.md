@@ -47,15 +47,15 @@ is not used for marketing, and it is not shared or sold.
 
 ## Deleting it
 
-In the app, open Settings and choose **Delete account**. That calls
+On the web page (app.komposit.werq.dev), open Settings and choose **Delete account**. That calls
 `DELETE /v1/me` on the gateway, which deletes your account, all its sessions and
 its usage counters at once. **Sign out**, also in Settings, ends just the
 session in that browser.
 
-If you can't sign in any more, ask the owner to delete your account: open an
-issue at [github.com/werqaferaw/komposit](https://github.com/werqaferaw/komposit),
-or write privately through the Security tab there (see
-[SECURITY.md](../SECURITY.md)).
+If you can't sign in any more, ask the owner to delete your account privately
+through the Security tab at
+[github.com/werqaferaw/komposit](https://github.com/werqaferaw/komposit/security)
+(see [SECURITY.md](../SECURITY.md)), so your email isn't posted in public.
 
 You can also remove Komposit from your Google Account's list of connected apps.
 That stops nothing on Komposit's side, because Komposit keeps no access to your

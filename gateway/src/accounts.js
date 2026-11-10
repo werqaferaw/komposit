@@ -11,8 +11,9 @@
 //
 // The flow is OAuth 2.0 authorization code with PKCE (S256), state and nonce.
 // One-time state lives in D1 (oauth_states, 10 minutes): the callback deletes
-// the row as it reads it, so a state works once, and the PKCE verifier and the
-// nonce never leave the server. The same state also goes into a short-lived
+// the row as it reads it, so a state works once, and the PKCE verifier never
+// leaves the server (the nonce goes to Google in the sign-in link and must come
+// back in the id_token). The same state also goes into a short-lived
 // HttpOnly cookie scoped to /auth/google/, and the callback requires the two to
 // match. That ties the callback to the browser that started the sign-in, so
 // nobody can sign someone else in to the attacker's account (login CSRF) by

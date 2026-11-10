@@ -171,7 +171,7 @@ export async function runCliTurn({ app = "illustrator", userText, emit = () => {
         if (isBrokenClaude(null, msg)) {
           emit({ type: "error", message: brokenClaudeMessage(claude), code: "claude_broken" });
         } else if (/not logged in|please run \/login|authentication|invalid api key|oauth/i.test(msg)) {
-          emit({ type: "error", message: "Claude Code is not signed in. Run `claude` in Terminal once to sign in, then try again.", code: "claude_auth" });
+          emit({ type: "error", message: `Claude Code is not signed in. Run \`claude\` in ${platform.name === "win" ? "PowerShell" : "Terminal"} once to sign in, then try again.`, code: "claude_auth" });
         } else if (resume && /session|resume|conversation/i.test(msg)) {
           emit({ type: "error", message: "Couldn't continue the earlier Claude Code session; your next message starts a fresh one.", code: "claude_resume" });
           result = { resumeFailed: true };

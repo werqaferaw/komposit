@@ -7,7 +7,7 @@ Komposit is a design agent that works in your open Illustrator, Photoshop and Af
 | **Mac** | `Komposit-mac.dmg` | macOS 13.5 or later, Apple silicon or Intel |
 | **Windows (early build)** | `Komposit-Setup-win.exe` | Windows 10 or 11, 64-bit |
 
-Both need Illustrator, Photoshop or After Effects, and one of: a Claude Pro or Max plan (through Claude Code), an Anthropic API key, a Google Gemini API key, an OpenRouter key, or an invite code.
+Both need Illustrator, Photoshop or After Effects, and one of: a Claude Pro or Max plan (through Claude Code), a ChatGPT Plus or Pro plan (through Codex), an Anthropic API key, a Google Gemini API key, or an OpenRouter or other OpenAI-compatible key.
 
 ## First launch
 
@@ -23,6 +23,7 @@ Both need Illustrator, Photoshop or After Effects, and one of: a Claude Pro or M
 - Exports PNG, JPG, SVG and print-ready PDF (Illustrator), PNG and JPG (Photoshop), frames and MP4 (After Effects), into `Komposit Exports` in your home folder. It never overwrites a file.
 - After Effects: a short preview video of the animation, right in the chat.
 - Attach any file (images, PDFs, logos, briefs) or talk instead of typing.
+- Use it from the app's own page, or from the web page at app.komposit.werq.dev in Chrome, Edge, Arc, Brave or Firefox. On the web page, an API key you paste stays in your browser, and requests go from there straight to the AI service you chose; the app on your computer does the work in your documents.
 - Your chats and settings stay on your computer.
 
 ## Known limits

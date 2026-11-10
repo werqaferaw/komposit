@@ -152,6 +152,8 @@ wr d1 migrations apply DB --remote
 
 echo "== 4. Google sign-in client id"
 CLIENT_ID="$(sed -n 's/^GOOGLE_CLIENT_ID = "\(.*\)"$/\1/p' wrangler.toml)"
+# A client id in the environment replaces the one in wrangler.toml (your own deployment).
+if [ -n "${GOOGLE_CLIENT_ID:-}" ] && [ "$GOOGLE_CLIENT_ID" != "$CLIENT_ID" ]; then CLIENT_ID=""; fi
 case "$CLIENT_ID" in
   "" | TODO*)
     if [ -n "${GOOGLE_CLIENT_ID:-}" ]; then

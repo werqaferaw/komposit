@@ -35,7 +35,7 @@ Signing in is never required. Invites, the app and the web page all work without
 | `src/cors.js` | The allowed origins (sign-in return and CORS) and the CORS headers. |
 | `src/util.js` | Small shared helpers. |
 | `migrations/` | The D1 schema: `users`, `sessions`, `oauth_states`. |
-| `wrangler.toml` | Name, KV and D1 bindings (placeholder ids until `setup.sh` fills them), vars, the custom-domain route. |
+| `wrangler.toml` | Name, KV and D1 bindings (the official deployment's ids; `setup.sh` writes yours for your own deployment), vars, the custom-domain route. |
 | `setup.sh` | One-time setup and deploy: KV, D1, migrations, secrets, deploy, health. |
 | `scripts/mint-invite.mjs` | Prints a new invite code and the `wrangler` commands that store or revoke it. |
 | `scripts/grant.mjs` | Grants, changes, revokes or lists account allowances, by email. |
@@ -106,7 +106,7 @@ For a session:
 
 ### Browsers (CORS)
 
-`/v1/messages`, `/v1/me` and `/auth/logout` answer browsers on the allowed origins: `RETURN_ORIGINS` (default `https://app.komposit.werq.dev`) plus the app's own local page, `http://127.0.0.1:4321`-`4330` and `http://localhost:4321`-`4330`.
+`/v1/messages`, `/v1/me`, `/auth/logout` and `/health` (the hosted page reads it to decide whether to offer sign-in and invites) answer browsers on the allowed origins: `RETURN_ORIGINS` (default `https://app.komposit.werq.dev`) plus the app's own local page, `http://127.0.0.1:4321`-`4330` and `http://localhost:4321`-`4330`.
 
 - A preflight (`OPTIONS` with `Origin` and `Access-Control-Request-Method`) gets `204` with `Access-Control-Allow-Origin: <origin>`, the route's methods, `Access-Control-Max-Age: 7200`, and `Access-Control-Allow-Headers` echoing `Access-Control-Request-Headers`. The `*` wildcard would not cover `Authorization`, and the browser SDK sends many headers (`anthropic-dangerous-direct-browser-access`, `anthropic-version`, `x-stainless-*`). Echoing them is safe because the gateway builds its upstream headers from scratch.
 - Every response to an allowed origin, errors included, carries `Access-Control-Allow-Origin`, `Vary: Origin` and `Access-Control-Expose-Headers: request-id, retry-after, retry-after-ms, x-should-retry`.

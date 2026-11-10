@@ -5,7 +5,7 @@ both systems, and smoke-tested on GitHub's `windows-latest` runner, a Windows
 PC with no Adobe apps. Nothing has yet driven a real Windows Illustrator,
 Photoshop or After Effects; [windows-testing.md](windows-testing.md) is the
 script for that first run. The macOS app is unchanged by this work (see
-[Mac behaviour](#mac-behaviour-is-unchanged)).
+[How it's put together](#how-its-put-together)).
 
 - [How it's put together](#how-its-put-together)
 - [Every macOS piece and its Windows counterpart](#every-macos-piece-and-its-windows-counterpart)

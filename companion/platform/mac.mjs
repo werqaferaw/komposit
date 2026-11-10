@@ -144,7 +144,7 @@ export function runJsx(app, jsxSource, { via = "stdout", timeoutMs = 120000, sig
         // -1743: macOS Automation permission was declined for this app.
         if (/-1743|not allowed to send Apple events|Not authori[sz]ed to send Apple events/i.test(msg)) {
           const e = new Error(
-            `Komposit is not allowed to control ${target.replace(/^application (id )?/, "")}. ` +
+            `Komposit is not allowed to control ${appLabel(target)}. ` +
               `Turn it on in System Settings > Privacy & Security > Automation.`,
           );
           e.code = "AUTOMATION_DENIED";

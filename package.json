@@ -19,7 +19,7 @@
   "scripts": {
     "serve": "node companion/server.mjs",
     "mcp": "node companion/mcp/doc-server.mjs",
-    "test": "node --test --test-reporter=spec companion/test/api-engine.test.mjs companion/test/tools.test.mjs companion/test/incidents.test.mjs companion/test/win.test.mjs companion/test/titles.test.mjs companion/test/claude-broken.test.mjs companion/test/codex.test.mjs companion/test/gemini.test.mjs companion/test/bridge-api.test.mjs companion/test/page-harness.test.mjs && node companion/test/openai-provider.test.mjs",
+    "test": "node --import ./companion/test/env.mjs --test --test-reporter=spec companion/test/api-engine.test.mjs companion/test/tools.test.mjs companion/test/incidents.test.mjs companion/test/win.test.mjs companion/test/titles.test.mjs companion/test/claude-broken.test.mjs companion/test/codex.test.mjs companion/test/gemini.test.mjs companion/test/bridge-api.test.mjs companion/test/page-harness.test.mjs && node companion/test/openai-provider.test.mjs",
     "test:live": "node scripts/test-live.mjs",
     "check": "node scripts/check.mjs",
     "build:mac": "packaging/build-mac.sh",

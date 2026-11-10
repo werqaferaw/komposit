@@ -60,7 +60,7 @@ with real Adobe apps on Windows yet. Please [open an issue](https://github.com/w
      `npm install -g @openai/codex` (it needs Node.js), run `codex login` and
      sign in with your ChatGPT account, then click *Check again*. Komposit uses
      only your ChatGPT plan, never an API key.
-   - **Key or invite code:** paste it; Komposit checks it before saving. It stays on your computer.
+   - **Key or invite code:** paste it; Komposit checks it before saving. On the app's own page it stays in the app's settings on your computer; on the web page (app.komposit.werq.dev) it stays in that browser and goes only to the AI service you chose.
 2. **Connect your Adobe apps.** Open the apps you use.
    - **Mac:** click **Allow** for each. macOS asks *"Komposit wants access to control
      Adobe Photoshop"*: click **OK**. Click **Allow** for *Design folders* too, so

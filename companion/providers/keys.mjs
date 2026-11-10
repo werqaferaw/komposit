@@ -3,7 +3,7 @@
 // person saves in the app, and the web page checks keys it keeps in the
 // browser, the same way.
 import Anthropic from "@anthropic-ai/sdk";
-import { GEMINI, quotaKind } from "./openai.mjs";
+import { GEMINI, quotaKind, inferFlavor } from "./openai.mjs";
 import { DEFAULT_GATEWAY } from "./choose.mjs";
 
 const IN_BROWSER = typeof window !== "undefined" && typeof document !== "undefined";
@@ -13,14 +13,9 @@ export const OPENAI_PRESETS = {
   openai: { baseUrl: "https://api.openai.com/v1", model: "gpt-5" },
 };
 
-export function flavorOf(baseUrl) {
-  try {
-    const h = new URL(baseUrl).hostname;
-    if (h.endsWith("openrouter.ai")) return "openrouter";
-    if (h === "api.openai.com") return "openai";
-  } catch {}
-  return "generic";
-}
+// Which wire flavor a service address speaks (Gemini at its own address
+// included, so its thought signatures go back).
+export const flavorOf = inferFlavor;
 
 export async function checkAnthropicKey(apiKey) {
   const client = new Anthropic({ apiKey, maxRetries: 0, timeout: 15000, ...(IN_BROWSER ? { dangerouslyAllowBrowser: true } : {}) });

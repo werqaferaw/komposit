@@ -26,7 +26,7 @@ Windows specifics are in [windows.md](windows.md).
    │  fetch http://127.0.0.1:4321 (token)                          │ AppleScript (Mac) · COM / AfterFX.exe (Windows)
    └──────────────────────────────────────────────────▶ the app  Illustrator · Photoshop · After Effects
 
- AI, chosen per Mac:  Claude Code (Claude plan) · Codex (ChatGPT plan) · Anthropic key · Gemini key ·
+ AI, chosen per computer: Claude Code (Claude plan) · Codex (ChatGPT plan) · Anthropic key · Gemini key ·
                       OpenAI-compatible key · invite code ──▶ gateway.komposit.werq.dev (gateway/ Worker, owner's key)
 ```
 
@@ -510,16 +510,19 @@ docs/               architecture.md (this) · getting-started.md · windows.md �
 
 ## 9. Status and roadmap
 
-**Works today:** the Mac app; the local server and UI; the Claude Code,
-Anthropic, OpenAI-compatible and invite engines; onboarding; chat history; the
-hosted UI and the invite gateway. The **Codex** engine is new: checked on a
-real ChatGPT sign-in, not yet with a live Adobe app. **Windows** is an early build: tested
-automatically on a PC without Adobe apps, not yet on a real PC with Adobe apps
+**Works today:** the Mac app; the local server and UI; the Claude Code, Codex,
+Anthropic, Gemini, OpenAI-compatible and invite engines (Codex and Gemini
+checked with real sign-ins and real edits in Photoshop); onboarding; chat
+history; the hosted page, which runs a turn itself when its key is kept in the
+browser. The invite gateway and its optional Google sign-in are by invitation
+and may be off. **Windows** is an early build: tested automatically on a PC
+without Adobe apps, not yet on a real PC with Adobe apps
 ([windows-testing.md](windows-testing.md)).
 
 **Next:**
 - Signed and notarized builds.
-- A relay so Safari can use the hosted page.
+- A relay, if a phone should drive the desktop or a turn should outlive its tab
+  (section 4 explains why there's none today: Safari uses the app's own page).
 - Grounded edits from a region you point at.
 - Premiere Pro through a CEP/UXP panel.
 

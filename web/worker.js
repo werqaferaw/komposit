@@ -17,6 +17,7 @@ const CSP = [
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src https://fonts.gstatic.com",
   "img-src 'self' blob: data:",
+  "media-src 'self' blob:", // After Effects previews play from blob: URLs
   `connect-src 'self' http://127.0.0.1:* http://localhost:* ${AI_SERVICES.join(" ")}`,
   "frame-ancestors 'none'",
   "base-uri 'none'",
