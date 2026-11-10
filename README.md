@@ -121,6 +121,7 @@ Choose an AI in the page's settings, open a document in an Adobe app, and ask.
 npm test             # unit tests: no network, no Adobe apps
 npm run check        # every module parses
 npm run test:live    # drives the open Adobe apps (makes and closes its own documents)
+npm run usage        # what your requests would cost at API prices (Claude subscription engine)
 ```
 
 Building the apps: `npm run build:mac` on a Mac (needs the Xcode command-line
