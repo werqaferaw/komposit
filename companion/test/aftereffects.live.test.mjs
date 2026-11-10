@@ -11,7 +11,8 @@ import * as ae from "../bridges/aftereffects.mjs";
 import { runViaFile } from "../bridges/extendscript.mjs";
 
 const LIVE = process.env.KOMPOSIT_LIVE === "1";
-const APP = `application ${JSON.stringify(process.env.AE_APP || "Adobe After Effects 2026")}`;
+// The platform layer finds the After Effects that's open (any year; AE_APP overrides).
+const APP = "aftereffects";
 const OUT = "~/Komposit Exports/komposit-ae-test";
 const DIR = join(homedir(), "Komposit Exports", "komposit-ae-test");
 

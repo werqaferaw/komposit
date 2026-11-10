@@ -58,14 +58,60 @@ export const folderPrompts = true;
 
 // ---------- the ExtendScript transport (AppleScript) ----------
 
-// AppleScript targets. Photoshop by bundle id (version-independent); After
-// Effects' app name is version-stamped, override with AE_APP.
+// AppleScript targets. Illustrator's app name has no year in it; Photoshop
+// goes by bundle id. After Effects is looked up every time (aeTarget below).
 const TARGET = {
   illustrator: 'application "Adobe Illustrator"',
   photoshop: 'application id "com.adobe.Photoshop"',
-  aftereffects: `application ${JSON.stringify(process.env.AE_APP || "Adobe After Effects 2026")}`,
 };
+
+// After Effects' app name carries its year ("Adobe After Effects 2025"), and a
+// script sent to a name that isn't installed never arrives. So no version is
+// assumed:
+//  1. AE_APP, if set (an unusual install name);
+//  2. else the After Effects that's running, by its own app name, so a script
+//     goes to the version the person has open, even with several installed;
+//  3. else the bundle id every version shares. macOS picks the newest one
+//     installed, which is also the one `activate` starts.
+const AE_BUNDLE_ID = "com.adobe.AfterEffects.application";
+
+// The app names of the running After Effects in `ps -axo comm=` output, newest
+// first: ".../Adobe After Effects 2025.app/Contents/MacOS/After Effects" ->
+// "Adobe After Effects 2025". The Render Engine and AE's helpers don't count.
+export function parseRunningAe(psOut) {
+  const names = new Set();
+  for (const line of String(psOut).split("\n")) {
+    const m = /\/([^/]+)\.app\/Contents\/MacOS\/After Effects$/.exec(line.trim());
+    if (m) names.add(m[1]);
+  }
+  return [...names].sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+}
+
+// The AppleScript target for After Effects, from AE_APP and the running names.
+export function targetForAe({ envName, running = [] } = {}) {
+  const name = envName || running[0];
+  return name ? `application ${JSON.stringify(name)}` : `application id ${JSON.stringify(AE_BUNDLE_ID)}`;
+}
+
+let aeSeen = null; // the After Effects last seen running (for target())
+
+async function aeTarget() {
+  const envName = process.env.AE_APP;
+  if (!envName) {
+    const r = await run("ps", ["-axo", "comm="], 3000);
+    aeSeen = (r.ok && parseRunningAe(r.stdout)[0]) || null;
+  }
+  return targetForAe({ envName, running: aeSeen ? [aeSeen] : [] });
+}
+
+// The AppleScript target for an app id; an AppleScript target string passes through.
+async function resolveTarget(app) {
+  return app === "aftereffects" ? aeTarget() : TARGET[app] || app;
+}
+
+// The same without looking at processes, for naming the app in messages.
 export function target(app) {
+  if (app === "aftereffects") return targetForAe({ envName: process.env.AE_APP, running: aeSeen ? [aeSeen] : [] });
   return TARGET[app] || app;
 }
 
@@ -75,7 +121,7 @@ function appLabel(target) {
   const s = m ? m[1] : String(target);
   if (/photoshop/i.test(s)) return "Photoshop";
   if (/illustrator/i.test(s)) return "Illustrator";
-  if (/after effects/i.test(s)) return "After Effects";
+  if (/after ?effects/i.test(s)) return "After Effects"; // also the bundle id
   return s;
 }
 
@@ -84,8 +130,8 @@ function appLabel(target) {
 // the script's last expression) or "file" (After Effects' `DoScript` returns
 // nothing; the script writes its result to a file). Resolves with stdout;
 // rejects on error, timeout or abort.
-export function runJsx(app, jsxSource, { via = "stdout", timeoutMs = 120000, signal } = {}) {
-  const target = TARGET[app] || app;
+export async function runJsx(app, jsxSource, { via = "stdout", timeoutMs = 120000, signal } = {}) {
+  const target = await resolveTarget(app);
   const verb = via === "file" ? "DoScript" : "do javascript";
   const jsxPath = scratchName("exec", "jsx");
   const scptPath = scratchName("exec", "applescript");
@@ -158,8 +204,8 @@ export function runJsx(app, jsxSource, { via = "stdout", timeoutMs = 120000, sig
 }
 
 // Bring an app to the front (best-effort; also launches it if not running).
-export function activateApp(app) {
-  const target = TARGET[app] || app;
+export async function activateApp(app) {
+  const target = await resolveTarget(app);
   return new Promise((resolve) => {
     const child = spawn("osascript", ["-e", `tell ${target} to activate`], { stdio: "ignore" });
     const t = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} resolve(); }, 90000);
@@ -282,7 +328,7 @@ export function appWindows(app) {
 export const BUNDLE_IDS = {
   illustrator: "com.adobe.illustrator",
   photoshop: "com.adobe.Photoshop",
-  aftereffects: "com.adobe.AfterEffects.application",
+  aftereffects: AE_BUNDLE_ID,
 };
 
 // Where each app is installed (Spotlight by bundle id), or null.

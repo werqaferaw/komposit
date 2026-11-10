@@ -3,8 +3,8 @@
 // WRITES its JSON result to a temp file that the shared transport reads back
 // (runViaFile). Render takes frames and an MP4 preview through the queue.
 //
-// On a Mac AE's app name is version-stamped; override with AE_APP if yours
-// differs (see platform/mac.mjs).
+// On a Mac, scripts go to the After Effects that's open, whatever its year
+// (platform/mac.mjs: aeTarget); AE_APP overrides the app name.
 import { join } from "node:path";
 import { runViaFile, activate as osActivate, scratchDir, readPng } from "./extendscript.mjs";
 import { env } from "../env.mjs";
