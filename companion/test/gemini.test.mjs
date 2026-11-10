@@ -14,6 +14,11 @@ import { openai, GEMINI, GEMINI_SKIP_SIGNATURE, inferFlavor } from "../providers
 import { runTurn } from "../harness/loop.mjs";
 import { checkGeminiKey } from "../setup.mjs";
 import { nameChat } from "../titles.mjs";
+import { allowSlowReplies } from "../net.mjs";
+import { readFileSync } from "node:fs";
+
+const FIX = new URL("./fixtures/gemini/", import.meta.url);
+const recorded = (name) => readFileSync(new URL(name, FIX), "utf8");
 
 const SIG_A = "CsEBAXLI2nx1Gm6AsigA"; // opaque base64 in real replies
 const SIG_B = "CsEBAXLI2nx1Gm6BsigB";
@@ -64,6 +69,16 @@ const server = createServer(async (req, res) => {
     return res.end(JSON.stringify({ object: "list", data: ids.map((id) => ({ id, object: "model", owned_by: "google" })) }));
   }
   const name = script.shift();
+  if (name?.startsWith("recorded:")) {
+    // A real reply from Gemini, replayed byte for byte.
+    const file = name.slice("recorded:".length);
+    if (file.endsWith(".json")) {
+      res.writeHead(503, { "content-type": "application/json", "retry-after": "0.01" });
+      return res.end(recorded(file));
+    }
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    return res.end(recorded(file));
+  }
   if (name === "busy503") {
     res.writeHead(503, { "content-type": "application/json", "retry-after": "0.01" });
     return res.end(JSON.stringify([{ error: { code: 503, message: "This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.", status: "UNAVAILABLE" } }]));
@@ -215,6 +230,39 @@ test("a busy model (503, high demand) is tried again; a quota refusal is not", a
 
   const busy = Object.assign(new Error("x"), { status: 503, detail: "This model is currently experiencing high demand." });
   assert.deepEqual(openai.explainError(busy), { message: "The model is overloaded right now (high demand). Try again in a minute.", code: "overloaded" });
+});
+
+test("real Gemini replies (recorded): the signed tool call, then the next step with the signature back", async () => {
+  script = ["recorded:busy-503.json", "recorded:inspect-call.sse"];
+  const r1 = await openai.stream({ system: "sys", messages: [{ role: "user", content: "Make the title red." }], tools: TOOLS, model: "gemini-3.8-flash", effort: "low", creds: CREDS });
+  // Gemini ends a tool step with finish_reason "stop"; the call still makes it a tool step.
+  assert.equal(r1.stopReason, "tool_use");
+  assert.deepEqual(r1.content, [{ type: "tool_use", id: "call_254099085606045336", name: "inspect", input: {}, extra_content: { google: { thought_signature: "RECORDED_SIGNATURE" } } }]);
+
+  const history = [
+    { role: "user", content: "Make the title red." },
+    { role: "assistant", content: r1.content },
+    { role: "user", content: [{ type: "tool_result", tool_use_id: r1.content[0].id, content: "1 text frame" }] },
+  ];
+  script = ["recorded:edit-call.sse"];
+  const r2 = await openai.stream({ system: "sys", messages: history, tools: TOOLS, model: "gemini-3.8-flash", effort: "low", creds: CREDS });
+  const sent = seen.at(-1).body.messages;
+  assert.deepEqual(sent.find((m) => m.role === "assistant").tool_calls[0].extra_content, { google: { thought_signature: "RECORDED_SIGNATURE" } });
+  const call = r2.content.find((b) => b.type === "tool_use");
+  assert.equal(call.name, "edit");
+  assert.match(call.input.code, /fillColor = c/);
+  assert.match(call.input.explanation, /title/i);
+  assert.equal(call.extra_content.google.thought_signature, "RECORDED_SIGNATURE");
+});
+
+test("this process waits for slow replies: Node's fetch pool is swapped for one with long timeouts", async () => {
+  const KEY = Symbol.for("undici.globalDispatcher.1");
+  assert.equal(await allowSlowReplies({ minutes: 20 }), true);
+  const agent = globalThis[KEY];
+  assert.equal(agent.__komposit, true);
+  assert.equal(await allowSlowReplies(), false, "only once");
+  const r = await fetch(`${BASE}/models`, { headers: { authorization: "Bearer good" } });
+  assert.equal(r.status, 200, "fetch still works through it");
 });
 
 test("errors read plainly: a refused key says so and offers Settings", async () => {

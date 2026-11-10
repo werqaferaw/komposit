@@ -29,6 +29,7 @@ import { watchForDialog } from "./dialogwatch.mjs";
 import { scratchDir } from "./scratch.mjs";
 import platform from "./platform/index.mjs";
 import { stepLabel, doneLabel, cleanToolName } from "./labels.mjs";
+import { allowSlowReplies } from "./net.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const UI_DIR = join(ROOT, "ui");
@@ -753,6 +754,7 @@ function listen(port) {
 
 async function start() {
   config(); // create settings + token on first run
+  await allowSlowReplies(); // a model may take minutes to start answering
   const first = Number(process.env.PORT || env.port || 4321);
   const ports = [first, ...PORT_RANGE.filter((p) => p !== first)];
   for (const port of ports) {

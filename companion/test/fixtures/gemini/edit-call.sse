@@ -1,0 +1,6 @@
+data: {"choices":[{"delta":{"role":"assistant","tool_calls":[{"extra_content":{"google":{"thought_signature":"RECORDED_SIGNATURE"}},"function":{"arguments":"{\"code\":\"var doc = app.activeDocument;\\nvar c = new RGBColor();\\nc.red = 192;\\nc.green = 57;\\nc.blue = 43;\\n\\nvar title = doc.textFrames[0];\\nfor (var i = 0; i \\u003c doc.textFrames.length; i++) {\\n  if (doc.textFrames[i].contents.indexOf(\\\"Jazz Night\\\") !== -1) {\\n    title = doc.textFrames[i];\\n    break;\\n  }\\n}\\n\\ntitle.textRange.characterAttributes.fillColor = c;\\n\\\"done\\\";\",\"explanation\":\"Change the title text color to red (#C0392B)\"}","name":"edit"},"id":"call_6517006544916158298","type":"function"}]},"index":0}],"created":1794268769,"id":"RECORDED_RESPONSE_ID","model":"gemini-3.8-flash","object":"chat.completion.chunk","usage":{"completion_tokens":170,"prompt_tokens":4549,"total_tokens":4719}}
+
+data: {"choices":[{"delta":{"role":"assistant"},"finish_reason":"stop","index":0}],"created":1794268769,"id":"RECORDED_RESPONSE_ID","model":"gemini-3.8-flash","object":"chat.completion.chunk","usage":{"completion_tokens":170,"prompt_tokens":4549,"total_tokens":4719}}
+
+data: [DONE]
+

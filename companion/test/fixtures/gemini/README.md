@@ -1,0 +1,1 @@
+Real replies from Gemini 3.8 Flash through the OpenAI-compatible endpoint (2026-11-10), recorded by the live check: the first two steps of a tool turn, and the 503 Google sends when the model is under high demand. Signatures and response ids are replaced with placeholders; everything else is as received.
