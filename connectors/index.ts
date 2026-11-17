@@ -2,8 +2,8 @@
 // loadConnectors() and talks to each one through protocol/connector.ts.
 //
 // Illustrator, Photoshop and After Effects through scripting (door "os-script"); Premiere Pro
-// through Komposit's own panel inside it (door "in-app-plugin"), installed with
-// installPremierePanel when the person asks for it.
+// through Komposit's own panel inside it (door "in-app-plugin"), installed through the
+// connector's `plugin` (installPremierePanel) when the person presses Install.
 import type { Platform } from "../protocol/common.ts";
 import type { Connector } from "../protocol/connector.ts";
 import { createKit } from "./_kit/adobe.ts";
@@ -12,11 +12,18 @@ import { createAfterEffects } from "./aftereffects/index.ts";
 import { createIllustrator } from "./illustrator/index.ts";
 import { createPhotoshop } from "./photoshop/index.ts";
 import { createPremiere } from "./premiere/index.ts";
+import { PANEL_SOURCE, panelVersion } from "./premiere/install.ts";
 
 export type { ConnectorOptions, CallOptions } from "./_kit/adobe.ts";
 export type { Incident, OnIncident } from "./_kit/incidents.ts";
 export type { ScriptTransport } from "./_kit/transport.ts";
 export { installPremierePanel, removePremierePanel, premierePanelState, PANEL_ID as PREMIERE_PANEL_ID } from "./premiere/install.ts";
+
+/** The plugins this copy of Komposit carries for apps that need one (door "in-app-plugin"), by
+ *  app, with their versions; null when the files aren't beside it. For the app's self-test. */
+export function shippedPlugins(): Record<string, string | null> {
+  return { premiere: panelVersion(PANEL_SOURCE) };
+}
 export type { DebugModeSwitch, PanelInstallOptions, PanelState, PanelStateOptions } from "./premiere/install.ts";
 
 export function loadConnectors(platform: Platform, opts: ConnectorOptions = {}): Map<string, Connector> {

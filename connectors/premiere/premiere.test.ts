@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import type { Server } from "node:http";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,7 +26,7 @@ import type { FakeTransportOptions } from "../_kit/fake.ts";
 import type { Incident } from "../_kit/incidents.ts";
 import { loadConnectors } from "../index.ts";
 import { createPremiere, MAX_WATCH } from "./index.ts";
-import { CSXS_VERSIONS, PANEL_ID, PANEL_SOURCE, cepExtensionsDir, installPremierePanel, panelAddressFile, premierePanelState, removePremierePanel } from "./install.ts";
+import { CSXS_VERSIONS, PANEL_ID, PANEL_SOURCE, cepExtensionsDir, installPremierePanel, panelAddressFile, panelFingerprint, panelVersion, premierePanelState, removePremierePanel } from "./install.ts";
 import type { DebugModeSwitch } from "./install.ts";
 import { maskCode, refuseScript } from "./scriptcheck.ts";
 import * as S from "./scripts.ts";
@@ -61,14 +61,14 @@ interface Rig {
 }
 
 // A connector with the made-up Premiere behind the real panel.
-async function rig(o: { panel?: boolean; evalScript?: (s: string) => string | null; fake?: FakeTransportOptions; kit?: ConnectorOptions; debugMode?: boolean; install?: boolean } = {}): Promise<Rig> {
+async function rig(o: { panel?: boolean; evalScript?: (s: string) => string | null; fake?: FakeTransportOptions; kit?: ConnectorOptions; debugMode?: boolean; install?: boolean; panelVersion?: string } = {}): Promise<Rig> {
   const dir = tmp("kp-pr-");
   const home = join(dir, "home");
   mkdirSync(home, { recursive: true });
   const pr = standInPremiere({ dir: join(dir, "premiere") });
   const extensionsDir = join(home, "Library", "Application Support", "Adobe", "CEP", "extensions");
   if (o.install) await installPremierePanel({ platform: "mac", extensionsDir, debugMode: fakeDebugMode() });
-  const panel = o.panel === false ? null : await startStandInPanel({ home, evalScript: o.evalScript ?? runIn(pr) });
+  const panel = o.panel === false ? null : await startStandInPanel({ home, evalScript: o.evalScript ?? runIn(pr), ...(o.panelVersion ? { version: o.panelVersion } : {}) });
   const incidents: Incident[] = [];
   const transport = createFakeTransport({ running: { premiere: true }, ...o.fake });
   const kit = createKit("mac", { transport, scratchDir: join(dir, "scratch"), home, onIncident: (i) => incidents.push(i), ...o.kit });
@@ -77,6 +77,8 @@ async function rig(o: { panel?: boolean; evalScript?: (s: string) => string | nu
 }
 
 const sent = (r: Rig) => r.panel!.scripts.length;
+/** The panel's version as it ships. */
+const SHIPPED = panelVersion(PANEL_SOURCE)!;
 
 // ---------- the manifest and loading ----------
 
@@ -111,7 +113,7 @@ test("the panel: its address in Komposit's data folder (this user only), a token
     if (process.platform !== "win32") assert.equal(statSync(panel.file).mode & 0o777, 0o600);
     const info = JSON.parse(readFileSync(panel.file, "utf8"));
     assert.match(info.token, /^[a-f0-9]{48}$/);
-    assert.equal(info.bridge, "0.1.0");
+    assert.equal(info.bridge, SHIPPED);
     assert.deepEqual(info.host, { appName: "PPRO", appVersion: "26.5.3" });
     const at = (path: string, headers: Record<string, string>, body?: string) =>
       fetch(`http://127.0.0.1:${panel.port}${path}`, { method: body ? "POST" : "GET", headers, ...(body ? { body } : {}) }).then(async (r) => ({ status: r.status, json: (await r.json()) as { bridge?: string; result: string } }));
@@ -119,7 +121,7 @@ test("the panel: its address in Komposit's data folder (this user only), a token
     assert.equal((await at("/status", { "x-komposit-token": "0".repeat(48) })).status, 401, "wrong token");
     const ok = await at("/status", { "x-komposit-token": panel.token });
     assert.equal(ok.status, 200);
-    assert.equal(ok.json.bridge, "0.1.0");
+    assert.equal(ok.json.bridge, SHIPPED);
     assert.equal(panel.scripts.length, 0, "status never reaches Premiere's scripting");
     assert.equal((await at("/status", { "x-komposit-token": panel.token, origin: "https://example.com" })).status, 403, "a web page");
     const rebinding = await new Promise<number>((resolve) => {
@@ -163,8 +165,8 @@ test("status: one plain sentence for each reason it can't work, and nothing sent
   const cases: [string, Parameters<typeof rig>[0], RegExp][] = [
     ["not installed", { panel: false, fake: { running: { premiere: false }, installed: { premiere: null } } }, /^Premiere Pro isn't installed on this Mac\.$/],
     ["not open", { panel: false, fake: { running: { premiere: false } } }, /^Premiere Pro isn't open\.$/],
-    ["no panel", { panel: false }, /^Komposit's panel isn't installed in Premiere Pro yet, so Komposit can't reach it\.$/],
-    ["unsigned panels off", { panel: false, install: true, debugMode: false }, /^Premiere Pro won't load Komposit's panel until unsigned panels are allowed: install the panel again, then quit and reopen Premiere Pro\.$/],
+    ["no panel", { panel: false }, /^Premiere Pro needs Komposit's panel: press Install for Premiere Pro in Komposit, then quit and reopen Premiere Pro\.$/],
+    ["unsigned panels off", { panel: false, install: true, debugMode: false }, /^Premiere Pro won't load Komposit's panel yet: press Install for Premiere Pro in Komposit again, then quit and reopen Premiere Pro\.$/],
     ["just started", { panel: false, install: true, fake: { uptime: 20 } }, /^Premiere Pro is still starting; Komposit's panel loads a few seconds after it opens\.$/],
     ["not loaded", { panel: false, install: true }, /^Premiere Pro hasn't loaded Komposit's panel: quit and reopen Premiere Pro once\.$/],
   ];
@@ -182,14 +184,16 @@ test("status: one plain sentence for each reason it can't work, and nothing sent
   // An older copy of the panel.
   const old = await rig({ panel: false, install: true });
   const xml = join(old.extensionsDir, PANEL_ID, "CSXS", "manifest.xml");
-  writeFileSync(xml, readFileSync(xml, "utf8").replace('ExtensionBundleVersion="0.1.0"', 'ExtensionBundleVersion="0.0.9"'));
-  assert.match((await old.c.status()).reason || "", /^Komposit's panel in Premiere Pro is out of date: install it again, then quit and reopen Premiere Pro\.$/);
+  writeFileSync(xml, readFileSync(xml, "utf8").replace(`ExtensionBundleVersion="${SHIPPED}"`, 'ExtensionBundleVersion="0.0.9"'));
+  assert.match((await old.c.status()).reason || "", /^Komposit's panel in Premiere Pro is out of date: press Update for Premiere Pro in Komposit, then quit and reopen Premiere Pro\.$/);
   await old.done();
+  // Nothing about the reasons points at folders or scripts: the person has a button for it.
+  for (const [, , reason] of cases) assert.ok(!/folder|script|CEP|PlayerDebugMode|extension/i.test(reason.source), reason.source);
 
-  const r = await rig();
+  const r = await rig({ install: true });
   try {
     const s = await r.c.status();
-    assert.deepEqual(s, { app: "premiere", label: "Premiere Pro", installed: true, running: true, ready: true, version: "26.5.3" });
+    assert.deepEqual(s, { app: "premiere", label: "Premiere Pro", installed: true, running: true, ready: true, plugin: "installed", version: "26.5.3" });
     assert.equal(sent(r), 0, "status asks the panel, not Premiere");
   } finally {
     await r.done();
@@ -577,7 +581,7 @@ test("the panel can't be reached: Premiere quit, a stale token, a script that ne
   const t = await rig();
   const info = JSON.parse(readFileSync(t.panel!.file, "utf8"));
   writeFileSync(t.panel!.file, JSON.stringify({ ...info, token: "f".repeat(48) }));
-  assert.match((await t.c.run("return 1;", SHOW(t.pr))).error!, /^Komposit's panel isn't installed in Premiere Pro yet/);
+  assert.match((await t.c.run("return 1;", SHOW(t.pr))).error!, /^Premiere Pro needs Komposit's panel: press Install for Premiere Pro in Komposit/);
   assert.equal(t.panel!.scripts.length, 0);
   await t.done();
 
@@ -616,7 +620,7 @@ test("the panel can't be reached: Premiere quit, a stale token, a script that ne
   const zfile = panelAddressFile({ platform: "mac", home: z.home });
   mkdirSync(dirname(zfile), { recursive: true });
   writeFileSync(zfile, JSON.stringify({ port: (listener.address() as any).port, token: "b".repeat(48), pid: dead }));
-  assert.match((await z.c.run("return 1;", SHOW(z.pr))).error!, /^Komposit's panel isn't installed in Premiere Pro yet/);
+  assert.match((await z.c.run("return 1;", SHOW(z.pr))).error!, /^Premiere Pro needs Komposit's panel: press Install for Premiere Pro in Komposit/);
   assert.equal((await z.c.status()).ready, false);
   assert.equal(hits, 0, "nothing reached whatever listens on that port now");
   listener.close();
@@ -643,7 +647,7 @@ test("install: into the CEP extensions folder given, replacing an older copy of 
   const dm = fakeDebugMode(false);
   assert.equal((await premierePanelState({ platform: "mac", extensionsDir: ext, debugMode: dm })).current, false);
   const r = await installPremierePanel({ platform: "mac", extensionsDir: ext, debugMode: dm });
-  assert.deepEqual(r, { path: join(ext, PANEL_ID), version: "0.1.0", note: "Quit and reopen Premiere Pro to load it." });
+  assert.deepEqual(r, { path: join(ext, PANEL_ID), version: SHIPPED, note: "Quit and reopen Premiere Pro to load it." });
   assert.deepEqual(dm.writes, [true]);
   for (const f of ["CSXS/manifest.xml", "index.html", "bridge.js"]) assert.equal(readFileSync(join(ext, PANEL_ID, f), "utf8"), readFileSync(join(PANEL_SOURCE, f), "utf8"), f);
   assert.ok(!existsSync(join(ext, PANEL_ID, "old-bridge.js")), "nothing of the older copy is left");
@@ -668,6 +672,115 @@ test("install from a test without its own folder and switch is refused: the pers
   await assert.rejects(installPremierePanel({ platform: "mac" }), /A test must pass its own extensionsDir and debugMode/);
   await assert.rejects(installPremierePanel({ platform: "mac", extensionsDir: tmp("kp-pr-x-") }), /A test must pass its own/);
   await assert.rejects(removePremierePanel({ platform: "mac", debugMode: fakeDebugMode() }), /A test must pass its own/);
+});
+
+test("install over Komposit 1.0's panel (same id, its own files): it reads as out of date even at the same version, and is replaced whole", async () => {
+  const dir = tmp("kp-pr-v1-");
+  const ext = join(dir, "extensions");
+  const dm = fakeDebugMode(true);
+  // 1.0's copy: this panel's files, but its bridge writes elsewhere; first at 0.1.0 (as 1.0
+  // shipped it), then even claiming this build's version.
+  const v1 = join(ext, PANEL_ID);
+  mkdirSync(join(v1, "CSXS"), { recursive: true });
+  writeFileSync(join(v1, "CSXS", "manifest.xml"), readFileSync(join(PANEL_SOURCE, "CSXS", "manifest.xml"), "utf8").replace(`ExtensionBundleVersion="${SHIPPED}"`, 'ExtensionBundleVersion="0.1.0"'));
+  writeFileSync(join(v1, "index.html"), readFileSync(join(PANEL_SOURCE, "index.html")));
+  writeFileSync(join(v1, "bridge.js"), "// 1.0's bridge: premiere-bridge.json in 1.0's folder\n");
+  assert.notEqual(SHIPPED, "0.1.0", "this panel's version is above 1.0's");
+  let st = await premierePanelState({ platform: "mac", extensionsDir: ext, debugMode: dm });
+  assert.deepEqual([st.installed, st.version, st.current], [true, "0.1.0", false]);
+  writeFileSync(join(v1, "CSXS", "manifest.xml"), readFileSync(join(PANEL_SOURCE, "CSXS", "manifest.xml")));
+  st = await premierePanelState({ platform: "mac", extensionsDir: ext, debugMode: dm });
+  assert.deepEqual([st.version, st.current], [SHIPPED, false], "the same number, other files: not current");
+  await installPremierePanel({ platform: "mac", extensionsDir: ext, debugMode: dm });
+  assert.equal(panelFingerprint(join(ext, PANEL_ID)), panelFingerprint(PANEL_SOURCE));
+  assert.equal((await premierePanelState({ platform: "mac", extensionsDir: ext, debugMode: dm })).current, true);
+  assert.deepEqual(readdirSync(ext), [PANEL_ID], "nothing left beside it (no staging or replaced copy)");
+});
+
+test("install where the old copy can't be moved (Windows, Premiere open): copied over in place, files only the old copy had removed; a copy that still fails says to quit Premiere", async () => {
+  const dir = tmp("kp-pr-busy-");
+  const ext = join(dir, "extensions");
+  const old = join(ext, PANEL_ID);
+  mkdirSync(join(old, "CSXS"), { recursive: true });
+  writeFileSync(join(old, "CSXS", "manifest.xml"), '<ExtensionManifest ExtensionBundleVersion="0.1.0"/>');
+  writeFileSync(join(old, "old-only.js"), "x");
+  const busy = () => { throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" }); };
+  const dm = fakeDebugMode(true);
+  await installPremierePanel({ platform: "win", extensionsDir: ext, debugMode: dm, rename: busy });
+  assert.equal(panelFingerprint(old), panelFingerprint(PANEL_SOURCE));
+  assert.ok(!existsSync(join(old, "old-only.js")));
+  assert.deepEqual(readdirSync(ext), [PANEL_ID]);
+  assert.deepEqual(dm.writes, [true]);
+  // A file where the panel has a folder (and the other way round) is replaced, not copied over.
+  rmSync(join(old, "index.html"));
+  mkdirSync(join(old, "index.html"));
+  await installPremierePanel({ platform: "win", extensionsDir: ext, debugMode: dm, rename: busy });
+  assert.equal(panelFingerprint(old), panelFingerprint(PANEL_SOURCE));
+  // The panel's files can't be written either (Premiere holds them): one plain sentence, and
+  // PlayerDebugMode left as it was.
+  const src = join(dir, "src");
+  cpSync(PANEL_SOURCE, src, { recursive: true });
+  writeFileSync(join(src, "bridge.js"), "// a newer panel\n");
+  chmodSync(join(old, "bridge.js"), 0o444);
+  try {
+    await assert.rejects(installPremierePanel({ platform: "win", extensionsDir: ext, debugMode: dm, source: src, rename: busy }), (e: Error) => e.message === "Komposit couldn't replace its panel while Premiere Pro has it open: quit Premiere Pro, then press Install again.");
+  } finally {
+    chmodSync(join(old, "bridge.js"), 0o644);
+  }
+  assert.deepEqual(dm.writes, [true, true]);
+  assert.equal(readFileSync(join(old, "bridge.js"), "utf8"), readFileSync(join(PANEL_SOURCE, "bridge.js"), "utf8"), "the working copy stays");
+  assert.deepEqual(readdirSync(ext), [PANEL_ID]);
+});
+
+test("the connector's plugin: Install puts the panel in (status: restart while Premiere runs the old one or none), Update replaces an older copy, Remove takes it out; status.plugin for each", async () => {
+  const dm = fakeDebugMode(true);
+  const mk = async (o: Parameters<typeof rig>[0] = {}) => {
+    const r = await rig(o);
+    const c = createPremiere(createKit("mac", { transport: createFakeTransport({ running: { premiere: true }, ...o.fake }), scratchDir: join(r.dir, "scratch2"), home: r.home }), { home: r.home, extensionsDir: r.extensionsDir, debugMode: dm });
+    return { ...r, c };
+  };
+  // Premiere closed: the panel's state from its files alone.
+  const closed = await mk({ panel: false, fake: { running: { premiere: false } } });
+  assert.equal((await closed.c.status()).plugin, "missing");
+  await closed.c.plugin!.install();
+  assert.equal((await closed.c.status()).plugin, "installed");
+  assert.deepEqual(dm.writes, [true], "unsigned panels allowed through the switch given");
+  await closed.c.plugin!.remove();
+  assert.equal((await closed.c.status()).plugin, "missing");
+  assert.ok(!existsSync(join(closed.extensionsDir, PANEL_ID)));
+  await closed.done();
+
+  // Premiere open, no panel: missing; installed: restart until Premiere loads it.
+  const open = await mk({ panel: false });
+  assert.equal((await open.c.status()).plugin, "missing");
+  await open.c.plugin!.install();
+  const after = await open.c.status();
+  assert.deepEqual([after.ready, after.plugin, after.reason], [false, "restart", "Premiere Pro hasn't loaded Komposit's panel: quit and reopen Premiere Pro once."]);
+  await open.done();
+
+  // An older panel running (1.0's number) with the new files in place: works, but restart to finish.
+  const older = await mk({ install: true, panelVersion: "0.1.0" });
+  const s = await older.c.status();
+  assert.deepEqual([s.ready, s.plugin], [true, "restart"]);
+  // Its files older too: Update.
+  const xml = join(older.extensionsDir, PANEL_ID, "CSXS", "manifest.xml");
+  writeFileSync(xml, readFileSync(xml, "utf8").replace(`ExtensionBundleVersion="${SHIPPED}"`, 'ExtensionBundleVersion="0.1.0"'));
+  assert.equal((await older.c.status()).plugin, "outdated");
+  await older.c.plugin!.install();
+  assert.equal((await older.c.status()).plugin, "restart");
+  await older.done();
+
+  // Premiere not on this computer: no plugin state at all.
+  const none = await mk({ panel: false, fake: { running: { premiere: false }, installed: { premiere: null } } });
+  assert.equal((await none.c.status()).plugin, undefined);
+  await none.done();
+
+  // A test without its own PlayerDebugMode switch can't install: a plain sentence, nothing copied.
+  const r = await rig({ panel: false });
+  const noWrite = createPremiere(createKit("mac", { transport: createFakeTransport({ running: { premiere: true } }), scratchDir: join(r.dir, "s3"), home: r.home }), { home: r.home, extensionsDir: r.extensionsDir, debugMode: { read: async () => true } });
+  await assert.rejects(noWrite.plugin!.install(), (e: Error) => e.message === "Komposit couldn't install its panel in Premiere Pro just now. Try again.");
+  assert.ok(!existsSync(join(r.extensionsDir, PANEL_ID)));
+  await r.done();
 });
 
 // ---------- the toolkit ----------

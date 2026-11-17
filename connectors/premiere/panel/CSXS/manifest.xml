@@ -3,13 +3,14 @@
   Komposit's door into Premiere Pro: a CEP extension with no visible UI.
   Premiere has no outside scripting door (no AppleScript `do javascript`, no COM
   DoScript), so this extension starts with Premiere, listens on 127.0.0.1 and runs
-  the ExtendScript Komposit sends it (see ../bridge.js). Its id is its own, so it can
-  be installed beside Komposit 1.0's panel (dev.werq.komposit.premiere).
+  the ExtendScript Komposit sends it (see ../bridge.js). Komposit 1.0's panel had the
+  same id at version 0.1.0; installing this replaces it, so the version stays above that.
+  ExtensionBundleVersion here and VERSION in bridge.js go up together.
 -->
-<ExtensionManifest Version="7.0" ExtensionBundleId="dev.werq.komposit.premiere" ExtensionBundleVersion="0.1.0" ExtensionBundleName="Komposit"
+<ExtensionManifest Version="7.0" ExtensionBundleId="dev.werq.komposit.premiere" ExtensionBundleVersion="0.2.0" ExtensionBundleName="Komposit"
   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <ExtensionList>
-    <Extension Id="dev.werq.komposit.premiere.bridge" Version="0.1.0" />
+    <Extension Id="dev.werq.komposit.premiere.bridge" Version="0.2.0" />
   </ExtensionList>
   <ExecutionEnvironment>
     <HostList>

@@ -7,10 +7,17 @@
 // its next start; it then writes its address (a port and a per-run token) to
 // premiere-panel.json, where the connector reads it.
 //
-// Nothing here runs by itself: the app calls installPremierePanel when the person asks for
-// it. Komposit 1.0's panel (dev.werq.komposit.premiere) is never touched.
+// Nothing here runs by itself: the app calls installPremierePanel when the person presses
+// Install (or Update) for Premiere Pro.
+//
+// Komposit 1.0's panel had the same id (dev.werq.komposit.premiere), at version 0.1.0, and
+// wrote its address to 1.0's own folder, where this Komposit never looks. So an installed copy
+// counts as current only when it is this build's panel file for file (panelFingerprint), not
+// just by its version, and installing replaces any other copy of this id whole. Other panels
+// in the folder are never touched.
 import { execFile } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -99,6 +106,28 @@ export function systemDebugMode(platform: Platform): DebugModeSwitch {
   };
 }
 
+/** A panel folder's files, as one hash (every file's path and bytes, in order), or null when
+ *  it can't be read. Two copies with the same hash are the same panel. */
+export function panelFingerprint(dir: string): string | null {
+  try {
+    const h = createHash("sha256");
+    const walk = (rel: string) => {
+      const names = readdirSync(join(dir, rel), { withFileTypes: true })
+        .filter((d) => !d.name.startsWith("."))
+        .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+      for (const d of names) {
+        const r = rel ? `${rel}/${d.name}` : d.name;
+        if (d.isDirectory()) walk(r);
+        else if (d.isFile()) h.update(`${r}\0`).update(readFileSync(join(dir, r))).update("\0");
+      }
+    };
+    walk("");
+    return h.digest("hex");
+  } catch {
+    return null;
+  }
+}
+
 /** A panel folder's version (ExtensionBundleVersion in its CSXS/manifest.xml), or null. */
 export function panelVersion(dir: string): string | null {
   try {
@@ -119,6 +148,8 @@ export interface PanelInstallOptions {
   source?: string;
   /** Default: the system's setting (systemDebugMode). */
   debugMode?: DebugModeSwitch;
+  /** Moves the installed copy aside (tests: a folder Windows won't move). Default: renameSync. */
+  rename?: (from: string, to: string) => void;
 }
 
 export interface PanelState {
@@ -127,7 +158,7 @@ export interface PanelState {
   version: string | null;
   /** The version Komposit ships. */
   shipped: string | null;
-  /** Installed, and the version Komposit ships. */
+  /** Installed, and the very panel Komposit ships (same version, same files). */
   current: boolean;
   /** PlayerDebugMode is on (unsigned panels load); null when it wasn't read. */
   debugMode: boolean | null;
@@ -163,13 +194,16 @@ export async function premierePanelState(o: PanelStateOptions = {}): Promise<Pan
   const path = join(dir, PANEL_ID);
   const installed = existsSync(join(path, "CSXS", "manifest.xml"));
   const version = installed ? panelVersion(path) : null;
-  const shipped = panelVersion(o.source ?? PANEL_SOURCE);
+  const source = o.source ?? PANEL_SOURCE;
+  const shipped = panelVersion(source);
   let debugMode: boolean | null = null;
   if (o.readDebugMode !== false) {
     try { debugMode = await (o.debugMode ?? systemDebugMode(platform)).read(); } catch { debugMode = null; }
   }
   // When this build can't see the panel it ships (shipped null), an installed one counts.
-  return { installed, version, shipped, current: installed && (!shipped || version === shipped), debugMode, path };
+  // Otherwise the same version isn't enough: 1.0's copy and this one could share a number.
+  const current = installed && (!shipped || (version === shipped && panelFingerprint(path) === panelFingerprint(source)));
+  return { installed, version, shipped, current, debugMode, path };
 }
 
 /**
@@ -183,21 +217,62 @@ export async function installPremierePanel(o: PanelInstallOptions = {}): Promise
   }
   const dest = join(dir, PANEL_ID);
   mkdirSync(dir, { recursive: true });
-  // Copied beside it first, then swapped in, so a half-copied panel never sits in its place.
+  // Copied beside it first, then swapped in, so a half-copied panel never sits in its place;
+  // the copy that was there is moved aside, not deleted, until the new one is in.
   const staging = join(dir, `.${PANEL_ID}.installing-${process.pid}`);
+  const aside = join(dir, `.${PANEL_ID}.replaced-${process.pid}`);
   rmSync(staging, { recursive: true, force: true });
+  rmSync(aside, { recursive: true, force: true });
   try {
     cpSync(source, staging, { recursive: true });
-    rmSync(dest, { recursive: true, force: true });
-    renameSync(staging, dest);
+    if (!existsSync(dest)) renameSync(staging, dest);
+    else {
+      let moved = false;
+      try {
+        (o.rename ?? renameSync)(dest, aside);
+        moved = true;
+        renameSync(staging, dest);
+      } catch (e) {
+        if (moved && !existsSync(dest)) { try { renameSync(aside, dest); } catch { /* left aside; installing again fixes it */ } }
+        // Windows won't move a folder Premiere Pro has open: copy over it instead, then take out
+        // what the new panel doesn't have.
+        if (!copyOver(staging, dest)) {
+          throw new KitError("Komposit couldn't replace its panel while Premiere Pro has it open: quit Premiere Pro, then press Install again.", "PANEL_BUSY");
+        }
+      }
+    }
   } finally {
     rmSync(staging, { recursive: true, force: true });
+    rmSync(aside, { recursive: true, force: true });
   }
   await debugMode.write(true);
   return { path: dest, version: panelVersion(dest), note: "Quit and reopen Premiere Pro to load it." };
 }
 
-/** Removes this panel (never 1.0's). `debugModeOff` also turns PlayerDebugMode off, which
+/** Copies a panel's files over another copy in place, after taking out what only the old copy
+ *  had (or has as a file where the panel has a folder, or the other way round: copying one over
+ *  the other would stop Node itself). False when it couldn't, or the result isn't the panel
+ *  file for file. */
+function copyOver(from: string, to: string): boolean {
+  try {
+    const prune = (rel: string) => {
+      for (const d of readdirSync(join(to, rel), { withFileTypes: true })) {
+        const r = rel ? join(rel, d.name) : d.name;
+        let kind: "dir" | "file" | null = null;
+        try { kind = statSync(join(from, r)).isDirectory() ? "dir" : "file"; } catch { kind = null; }
+        if (!kind || (kind === "dir") !== d.isDirectory()) rmSync(join(to, r), { recursive: true, force: true });
+        else if (kind === "dir") prune(r);
+      }
+    };
+    prune("");
+    cpSync(from, to, { recursive: true, force: true });
+    return panelFingerprint(from) === panelFingerprint(to);
+  } catch {
+    return false;
+  }
+}
+
+/** Removes this panel (any copy of its id). `debugModeOff` also turns PlayerDebugMode off, which
  *  other unsigned panels may need, so it's left on unless asked. */
 export async function removePremierePanel(o: PanelInstallOptions & { debugModeOff?: boolean } = {}): Promise<{ removed: boolean }> {
   const { dir, debugMode } = placesOf(o);

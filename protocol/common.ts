@@ -43,7 +43,15 @@ export interface AppStatus {
   /** One plain sentence when not ready, e.g. "After Effects is showing a dialog." */
   reason?: string;
   version?: string;
+  /** Only for an app Komposit reaches through its own plugin inside it (Premiere Pro's panel),
+   *  when the app is installed. "missing": not installed yet; "outdated": an older copy, or one
+   *  the app won't load (install again); "restart": the current copy is in place, but the
+   *  running app hasn't loaded it (quit and reopen it); "installed": in place (and loaded, when
+   *  the app is running). Installing is the person's press (`apps.plugin`), never automatic. */
+  plugin?: PluginState;
 }
+
+export type PluginState = "missing" | "outdated" | "restart" | "installed";
 
 export interface Usage {
   inputTokens: number;

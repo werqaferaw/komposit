@@ -128,4 +128,15 @@ export interface Connector {
   /** Read or answer a dialog that blocks the app. `theirs`: the dialog is the person's (up
    *  before Komposit's step, or it came up while they were in the app): nothing is pressed. */
   dialog?(action: "read" | "press", button?: string): Promise<{ ok: boolean; text?: string; buttons?: string[]; theirs?: boolean }>;
+  /** Komposit's own plugin inside the app (door "in-app-plugin": Premiere Pro's panel). Its
+   *  state is in status().plugin. Called only when the person presses Install, Update or Remove. */
+  plugin?: AppPlugin;
+}
+
+export interface AppPlugin {
+  /** Copies the plugin in (or replaces an older copy) and lets the app load it. The app loads
+   *  it at its next start. Throws a plain sentence when it can't. */
+  install(): Promise<void>;
+  /** Takes it out again. */
+  remove(): Promise<void>;
 }

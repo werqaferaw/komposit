@@ -167,6 +167,11 @@ export interface Methods {
   /** `seconds`: an After Effects comp's length. `doc`: the document that was made (After Effects:
    *  the project, with the new comp in `comp`), so the next message can go to it. */
   "apps.newDocument": { params: { app: string; width?: number; height?: number; seconds?: number }; result: { ok: boolean; message?: string; doc?: DocRef & { comp?: string } } };
+  /** Komposit's own plugin inside an app that needs one (AppStatus.plugin: Premiere Pro's
+   *  panel). "install" puts it in, or updates an older copy (only ever on the person's press);
+   *  "remove" takes it out (Settings); "state" only reads. `status`: the app's status after it,
+   *  fresh. `message`: one plain sentence when it didn't work. Needs no account. */
+  "apps.plugin": { params: { app: string; action: "state" | "install" | "remove" }; result: { ok: boolean; message?: string; status: AppStatus } };
 
   "projects.list": { params: Record<string, never>; result: ProjectInfo[] };
   /** Without `root`, the core asks the shell to show a folder picker. Null when cancelled. */

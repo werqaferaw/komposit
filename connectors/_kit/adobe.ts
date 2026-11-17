@@ -47,8 +47,8 @@ export interface ConnectorOptions {
   /** Premiere Pro: the CEP extensions folder its panel is installed in (to say why it isn't
    *  answering). Default: the person's own. */
   cepExtensionsDir?: string;
-  /** Premiere Pro: reads CEP's PlayerDebugMode, for the same. Default: the system's setting. */
-  cepDebugMode?: { read(): Promise<boolean> };
+  /** Premiere Pro: CEP's PlayerDebugMode, read for the same and turned on by an install. Default: the system's setting. */
+  cepDebugMode?: { read(): Promise<boolean>; write?(on: boolean): Promise<void> };
   /** Is the person in this app right now (core/runtime/frontapp.ts)? A dialog that comes up
    *  then is theirs: Komposit waits and never presses it. Default: never. */
   personIn?: (app: string) => boolean;

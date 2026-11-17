@@ -10,8 +10,9 @@
 // data (readable by this user only). Every request must carry that token; requests from a
 // web page (anything with an Origin header) or for another host name are refused.
 //
-// Komposit 1.0's panel is another extension (dev.werq.komposit.premiere) with its own file
-// (premiere-bridge.json in 1.0's folder); the two can be installed side by side.
+// Its id (dev.werq.komposit.premiere) is the one Komposit 1.0's panel had: installing this
+// replaces that copy (version 0.1.0, which wrote premiere-bridge.json in 1.0's folder), so
+// VERSION (and the manifest's) must stay above 0.1.0 for an old copy to read as out of date.
 //
 // Written for the oldest CEP this targets (CEP 9, Premiere Pro 2020: Node 8).
 (function () {
@@ -24,7 +25,7 @@
   var os = req("os");
   var crypto = req("crypto");
 
-  var VERSION = "0.1.0";
+  var VERSION = "0.2.0";
   var MAX_BODY = 8 * 1024 * 1024;
   var FOLDER = "dev.werq.komposit";
 

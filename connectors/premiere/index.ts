@@ -16,7 +16,7 @@
 // Reads (documents, inspect, selection, renders, exports) work on the active project.
 import { execFile } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
-import type { AppStatus, DocRef } from "../../protocol/common.ts";
+import type { AppStatus, DocRef, PluginState } from "../../protocol/common.ts";
 import type { Connector, ConnectorManifest, FileResult, Picture, RunResult } from "../../protocol/connector.ts";
 import { dataOf, fileFailure, outputPath, pngPicture, runResult, watching } from "../_kit/adobe.ts";
 import type { CallOptions, Kit } from "../_kit/adobe.ts";
@@ -27,8 +27,8 @@ import { guideLoader } from "../_kit/guide.ts";
 import { readAndRemove, rmQuiet } from "../_kit/scratch.ts";
 import { KitError } from "../_kit/transport.ts";
 import { createPanelDoor } from "./door.ts";
-import { cepExtensionsDir, panelAddressFile, premierePanelState } from "./install.ts";
-import type { DebugModeSwitch } from "./install.ts";
+import { cepExtensionsDir, installPremierePanel, panelAddressFile, premierePanelState, removePremierePanel } from "./install.ts";
+import type { DebugModeSwitch, PanelState } from "./install.ts";
 import { refuseScript } from "./scriptcheck.ts";
 import * as S from "./scripts.ts";
 import { contactSheets, smallerPng } from "./sheets.ts";
@@ -64,10 +64,14 @@ export interface PremiereOptions {
   /** Where the panel writes its address. Default: premiere-panel.json under "dev.werq.komposit"
    *  in the person's application data (install.ts panelAddressFile). */
   panelFile?: string;
-  /** The CEP extensions folder, to tell why the panel isn't answering. Default: the person's own. */
+  /** The CEP extensions folder the panel is installed in (and read from, to tell why it isn't
+   *  answering). Default: the person's own. */
   extensionsDir?: string;
-  /** Reads CEP's PlayerDebugMode, for the same. Default: the system's setting. */
-  debugMode?: Pick<DebugModeSwitch, "read">;
+  /** CEP's PlayerDebugMode, for the same; installing turns it on (write). Default: the system's
+   *  setting. A test passes its own: one without `write` can't install. */
+  debugMode?: Pick<DebugModeSwitch, "read"> & Partial<Pick<DebugModeSwitch, "write">>;
+  /** The panel's files to install. Default: the ones this Komposit ships (install.ts PANEL_SOURCE). */
+  panelSource?: string;
   /** The home folder the default places are under. Default: os.homedir(). */
   home?: string;
 }
@@ -130,17 +134,29 @@ export function createPremiere(kit: Kit, o: PremiereOptions = {}): Connector {
   const extensionsDir = o.extensionsDir ?? cepExtensionsDir(places);
   const device = kit.platform === "win" ? "PC" : "Mac";
 
-  // Why the panel can't be reached, in one plain sentence.
-  async function unreachable(): Promise<string> {
-    if (!(await kit.transport.isAppRunning(APP).catch(() => true))) return `${LABEL} isn't open. Open it, then try again.`;
-    const st = await premierePanelState({ platform: kit.platform, extensionsDir, ...(o.debugMode ? { debugMode: o.debugMode } : {}) }).catch(() => null);
-    if (!st || !st.installed) return `Komposit's panel isn't installed in ${LABEL} yet, so Komposit can't reach it.`;
-    if (!st.current) return `Komposit's panel in ${LABEL} is out of date: install it again, then quit and reopen ${LABEL}.`;
-    if (st.debugMode === false) return `${LABEL} won't load Komposit's panel until unsigned panels are allowed: install the panel again, then quit and reopen ${LABEL}.`;
+  const source = o.panelSource ? { source: o.panelSource } : {};
+  // The panel's files where Premiere loads them from (no PlayerDebugMode unless asked: that's
+  // five processes on a Mac, read only when the panel isn't answering).
+  const panelFiles = (readDebugMode = false): Promise<PanelState | null> =>
+    premierePanelState({ platform: kit.platform, extensionsDir, ...source, readDebugMode, ...(o.debugMode ? { debugMode: o.debugMode } : {}) }).catch(() => null);
+  const filesState = (st: PanelState | null): PluginState => (!st || !st.installed ? "missing" : !st.current ? "outdated" : "installed");
+
+  // Why the panel can't be reached, in one plain sentence (for the person and the AI alike: it
+  // points at the Install button in Komposit, never at folders or scripts), and what that means
+  // for the panel (AppStatus.plugin).
+  async function whyNot(): Promise<{ reason: string; plugin: PluginState }> {
+    const st = await panelFiles(true);
+    if (!st || !st.installed) return { plugin: "missing", reason: `${LABEL} needs Komposit's panel: press Install for ${LABEL} in Komposit, then quit and reopen ${LABEL}.` };
+    if (!st.current) return { plugin: "outdated", reason: `Komposit's panel in ${LABEL} is out of date: press Update for ${LABEL} in Komposit, then quit and reopen ${LABEL}.` };
+    if (st.debugMode === false) return { plugin: "outdated", reason: `${LABEL} won't load Komposit's panel yet: press Install for ${LABEL} in Komposit again, then quit and reopen ${LABEL}.` };
     const pid = await kit.transport.appPid(APP).catch(() => null);
     const up = pid ? await kit.transport.processUptime(pid).catch(() => 0) : 0;
-    if (up > 0 && up < 60) return `${LABEL} is still starting; Komposit's panel loads a few seconds after it opens.`;
-    return `${LABEL} hasn't loaded Komposit's panel: quit and reopen ${LABEL} once.`;
+    if (up > 0 && up < 60) return { plugin: "installed", reason: `${LABEL} is still starting; Komposit's panel loads a few seconds after it opens.` };
+    return { plugin: "restart", reason: `${LABEL} hasn't loaded Komposit's panel: quit and reopen ${LABEL} once.` };
+  }
+  async function unreachable(): Promise<string> {
+    if (!(await kit.transport.isAppRunning(APP).catch(() => true))) return `${LABEL} isn't open. Open it, then try again.`;
+    return (await whyNot()).reason;
   }
 
   // One script in Premiere: quiet, and (with a DocRef) only in that project, when it's the
@@ -320,16 +336,46 @@ export function createPremiere(kit: Kit, o: PremiereOptions = {}): Connector {
   const connector: Connector = {
     manifest,
 
+    // Komposit's panel: put in, updated or taken out only when the person presses the button.
+    plugin: {
+      async install() {
+        const debugMode = o.debugMode?.write ? (o.debugMode as DebugModeSwitch) : undefined;
+        try {
+          await installPremierePanel({ platform: kit.platform, extensionsDir, ...source, ...(debugMode ? { debugMode } : {}) });
+        } catch (e) {
+          const msg = (e as Error)?.message || "";
+          throw new KitError(/^Komposit /.test(msg) && msg.length < 300 ? msg : `Komposit couldn't install its panel in ${LABEL} just now. Try again.`, "PANEL_INSTALL");
+        }
+      },
+      async remove() {
+        const debugMode = o.debugMode?.write ? (o.debugMode as DebugModeSwitch) : undefined;
+        try {
+          await removePremierePanel({ platform: kit.platform, extensionsDir, ...(debugMode ? { debugMode } : {}) });
+        } catch {
+          throw new KitError(`Komposit couldn't remove its panel from ${LABEL}. Quit ${LABEL}, then try again.`, "PANEL_REMOVE");
+        }
+      },
+    },
+
     // Running, and the panel answering. Nothing reaches Premiere's scripting.
     async status(): Promise<AppStatus> {
       const t = kit.transport;
       const [installedPath, running] = await Promise.all([t.installedPath(APP).catch(() => null), t.isAppRunning(APP).catch(() => false)]);
       const installed = !!installedPath || running;
       const base: AppStatus = { app: APP, label: LABEL, installed, running, ready: false };
-      if (!running) return { ...base, reason: installed ? `${LABEL} isn't open.` : `${LABEL} isn't installed on this ${device}.` };
+      if (!installed) return { ...base, reason: `${LABEL} isn't installed on this ${device}.` };
+      if (!running) return { ...base, reason: `${LABEL} isn't open.`, plugin: filesState(await panelFiles()) };
       const p = await door.ping();
-      if (p.ok) return { ...base, ready: true, ...(p.host?.appVersion ? { version: String(p.host.appVersion) } : {}) };
-      return { ...base, reason: await unreachable() };
+      if (p.ok) {
+        // Answering. Its files may still be older than this Komposit's (Update), or updated
+        // while the older panel still runs (quit and reopen to finish).
+        const st = await panelFiles();
+        const files = filesState(st);
+        const plugin: PluginState = files !== "installed" ? files : st?.shipped && p.bridge && p.bridge !== st.shipped ? "restart" : "installed";
+        return { ...base, ready: true, plugin, ...(p.host?.appVersion ? { version: String(p.host.appVersion) } : {}) };
+      }
+      const why = await whyNot();
+      return { ...base, reason: why.reason, plugin: why.plugin };
     },
 
     // The open projects, with their sequences; the active one is where scripts go.

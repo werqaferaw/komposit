@@ -9,7 +9,7 @@ It uses Komposit's open connectors (`connectors/`) and toolkit (`toolkit/`). It'
 - macOS or Windows, with Node.js 22 or later. Windows also needs the small helper program `komposit-win.exe`, which isn't in this repository yet (see `KOMPOSIT_WIN_HELPER` below), and has had far less testing with the real apps than macOS.
 - Illustrator, Photoshop, After Effects or Premiere Pro, open. The server never opens an app by itself.
 - After Effects: turn on *Allow Scripts to Write Files and Access Network* (Settings > Scripting & Expressions on a Mac, Edit > Preferences > Scripting & Expressions on Windows).
-- Premiere Pro: Komposit's small panel inside it (`connectors/premiere/panel/`), which takes the scripts, since Premiere has no outside scripting door. `installPremierePanel()` in `connectors/premiere/install.ts` copies it into your CEP extensions folder and allows unsigned panels (CEP's PlayerDebugMode); Premiere loads it at its next start. `apps` says when it's missing or not loaded.
+- Premiere Pro: Komposit's small panel inside it (`connectors/premiere/panel/`), which takes the scripts, since Premiere has no outside scripting door. The Komposit app installs it when you press Install for Premiere Pro; standalone, `installPremierePanel()` in `connectors/premiere/install.ts` copies it into your CEP extensions folder and allows unsigned panels (CEP's PlayerDebugMode); Premiere loads it at its next start. `apps` says when it's missing or not loaded.
 - macOS: the first time the AI works in an app, macOS asks whether your AI app (Claude, Terminal...) may control it. Say OK. The server never shows this prompt itself. If you said no, turn it on in System Settings > Privacy & Security > Automation.
 
 ## Build

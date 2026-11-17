@@ -238,6 +238,8 @@ export interface StandInPanelOptions {
   env?: Record<string, string>;
   /** The panel's process id as it writes it (default: this process, which is alive). */
   pid?: number;
+  /** The version the panel says it is (an older copy still running). Default: its own. */
+  version?: string;
 }
 
 export interface StandInPanel {
@@ -275,7 +277,9 @@ export async function startStandInPanel(o: StandInPanelOptions): Promise<StandIn
       addEventListener: (type: string, fn: () => void) => { if (type === "unload") unload.push(fn); },
     },
   };
-  vm.runInNewContext(readFileSync(BRIDGE_JS, "utf8"), sandbox, { filename: "bridge.js" });
+  let code = readFileSync(BRIDGE_JS, "utf8");
+  if (o.version) code = code.replace(/var VERSION = "[^"]*";/, `var VERSION = ${JSON.stringify(o.version)};`);
+  vm.runInNewContext(code, sandbox, { filename: "bridge.js" });
   const folder = o.platform === "win32" ? join(o.env?.APPDATA || join(o.home, "AppData", "Roaming"), "dev.werq.komposit") : join(o.home, "Library", "Application Support", "dev.werq.komposit");
   const file = join(folder, "premiere-panel.json");
   const t0 = Date.now();
