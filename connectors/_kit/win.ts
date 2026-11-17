@@ -55,8 +55,10 @@ const exeBase = (app: string) => (EXE[app] || "").replace(/\.exe$/i, "");
 const TIMEOUT_TEXT = (label: string) =>
   `${label} didn't answer in time. If it's showing a dialog, close it. The step may still finish inside the app, so check before retrying.`;
 
+/** The app's data folder, %APPDATA%\dev.werq.komposit (shell/config.ts DATA_FOLDER), never an
+ *  older Komposit's %APPDATA%\Komposit: a helper built on demand goes in its bin folder. */
 export function defaultDataDir(): string {
-  return wpath.join(envDir("APPDATA", wpath.join(HOME, "AppData", "Roaming")), "Komposit");
+  return wpath.join(envDir("APPDATA", wpath.join(HOME, "AppData", "Roaming")), "dev.werq.komposit");
 }
 
 // `reg query` output -> { valueName: data } (REG_SZ and REG_EXPAND_SZ).

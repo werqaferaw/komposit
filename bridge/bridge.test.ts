@@ -8,7 +8,7 @@ import { createServer, type Socket } from "node:net";
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildBridge } from "./build.ts";
 
@@ -71,7 +71,8 @@ function run(p: Program, env: Record<string, string | undefined>) {
  *  params too, with echoParams). `raw` keeps every line after the pass exactly as it came. */
 async function fakeCore(opts: { token: string; holdId?: number; echoParams?: boolean; closeOnPass?: boolean }) {
   const dir = tmp();
-  const path = join(dir, "c.sock");
+  // The core serves a named pipe on Windows (core/main.ts toolboxSocketPath), a socket elsewhere.
+  const path = process.platform === "win32" ? `\\\\.\\pipe\\${basename(dir)}-c` : join(dir, "c.sock");
   const sockets: Socket[] = [];
   const seen: any[] = [];
   const raw: string[] = [];

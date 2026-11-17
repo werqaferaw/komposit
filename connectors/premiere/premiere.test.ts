@@ -107,7 +107,8 @@ test("the panel: its address in Komposit's data folder (this user only), a token
     assert.equal(panel.file, panelAddressFile({ platform: "mac", home }), "the panel and the connector agree on where the address is");
     assert.ok(panel.file.includes(join("Application Support", "dev.werq.komposit")));
     assert.ok(!/Application Support\/Komposit\//.test(panel.file), "never 1.0's folder");
-    assert.equal(statSync(panel.file).mode & 0o777, 0o600);
+    // Windows has no Unix modes (Node reports 0o666); there the folder in %APPDATA% is the person's own.
+    if (process.platform !== "win32") assert.equal(statSync(panel.file).mode & 0o777, 0o600);
     const info = JSON.parse(readFileSync(panel.file, "utf8"));
     assert.match(info.token, /^[a-f0-9]{48}$/);
     assert.equal(info.bridge, "0.1.0");

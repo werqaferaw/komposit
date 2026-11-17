@@ -70,7 +70,7 @@ function fake(m: ConnectorManifest, running: boolean): Connector {
     undo: () => op("undo", () => ({ ok: true })),
     preflight: () => op("preflight", () => ({ text: "Ready for print.", issues: [] })),
     newDocument: (o) => op("newDocument", () => ({ app, name: o.name || "Untitled-1" })),
-    open: (path) => op("open", () => ({ app, name: path.split("/").pop() || "x", path })),
+    open: (path) => op("open", () => ({ app, name: path.split(/[\\/]/).pop() || "x", path })),
     place: (o) => op("place", () => ({ ok: true, path: o.file })),
     guide: async (topic) => (topic ? `${m.label} recipes: ${topic}\n\nUse doc.pathItems.rectangle(top, left, w, h).` : `${m.label} recipes\n\nTopics:\n- shapes: rectangles and ellipses`),
   };

@@ -196,7 +196,8 @@ test("exports never overwrite and stay inside the home folder; nothing is saved 
     const a = await c.call("export", { app: "illustrator", format: "png", name: "Poster" });
     const b = await c.call("export", { app: "illustrator", format: "png", name: "Poster.png" });
     assert.ok(!a.isError && !b.isError, textOf(a) + textOf(b));
-    assert.match(textOf(a), new RegExp(`"path": "${join(exportsDir, "Poster.png").replace(/[.]/g, "\\.")}"`));
+    // As JSON writes it (a Windows path's backslashes doubled).
+    assert.ok(textOf(a).includes(`"path": ${JSON.stringify(join(exportsDir, "Poster.png"))}`), textOf(a));
     assert.match(textOf(b), /Poster 2\.png/);
     assert.deepEqual(readdirSync(exportsDir).sort(), ["Poster 2.png", "Poster.png"]);
     // Default name: the document's.
@@ -254,7 +255,7 @@ test("guide, open, place and new_document", async () => {
     writeFileSync(file, "png");
     const placed = await c.call("place", { app: "photoshop", path: "~/logo.png" });
     assert.ok(!placed.isError, textOf(placed));
-    assert.match(textOf(placed), new RegExp(file.replace(/[.]/g, "\\.")));
+    assert.ok(textOf(placed).includes(JSON.stringify(file)), textOf(placed));
     const opened = await c.call("open", { app: "illustrator", path: file });
     assert.match(textOf(opened), /"name": "logo\.png"/);
     const made = await c.call("new_document", { app: "photoshop", width: 800, height: 600, name: "Banner" });

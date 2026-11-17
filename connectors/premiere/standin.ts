@@ -6,7 +6,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import * as os from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 import { encodePng } from "./sheets.ts";
@@ -45,7 +45,7 @@ class FileImpl {
   private buf = "";
   private mode = "";
   constructor(p: string) {
-    this.fsName = String(p);
+    this.fsName = normalize(String(p)); // the system's own path, as ExtendScript's fsName is (backslashes on Windows)
     this.name = encodeURI(basename(this.fsName));
   }
   get exists() { return existsSync(this.fsName) && statSync(this.fsName).isFile(); }
@@ -59,7 +59,7 @@ class FolderImpl {
   fsName: string;
   name: string;
   constructor(p: string) {
-    this.fsName = String(p);
+    this.fsName = normalize(String(p)); // the system's own path, as ExtendScript's fsName is (backslashes on Windows)
     this.name = encodeURI(basename(this.fsName));
   }
   get exists() { return existsSync(this.fsName) && statSync(this.fsName).isDirectory(); }

@@ -1,0 +1,6 @@
+# Text files keep LF line endings on every system (a Windows checkout too): the skills carry the
+# guides byte for byte, and the scripts sent to the apps are compared as written.
+* text=auto eol=lf
+*.ico binary
+*.png binary
+*.icns binary
