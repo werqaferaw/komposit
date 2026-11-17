@@ -402,3 +402,28 @@ for (var i = 0; i < app.projects.numProjects; i++) { if (File(app.projects[i].pa
 if (!app.openDocument(f.fsName, true, true, true)) throw new Error("Premiere Pro didn't open " + decodeURI(f.name));
 return { name: decodeURI(f.name), path: f.fsName, already: false, active: !!(app.project && __kpSame(app.project.path, f.fsName)) };`;
 }
+
+// Listening (ported from 1.0's listen()): the request's sequence as a timeline of sound. Each
+// audio clip with its media file, where it sits, its in and out point (so its speed shows),
+// and whether it's disabled, nested or reversed (those aren't followed). Read-only.
+export const LISTEN_LAYOUT = `${LIB}
+var p = app.project; if (!p || !p.path) return { noDocument:true };
+var s = __kpTarget(); if (!s) return { noSequence:true };
+var out = { project:p.path, name:s.name, id:String(s.sequenceID), duration:Number(s.end)/TPS, audio:[], video:[] };
+for (var i=0;i<s.audioTracks.numTracks;i++){
+  var t = s.audioTracks[i], rec = { index:i, name:t.name, clips:[] };
+  try { if (t.isMuted()) rec.muted = true; } catch(e){}
+  for (var j=0;j<t.clips.numItems && j<800;j++){
+    var c = t.clips[j], r = { name:c.name, start:c.start.seconds, end:c.end.seconds, srcIn:c.inPoint.seconds, srcOut:c.outPoint.seconds };
+    try { if (c.disabled) r.disabled = true; } catch(e){}
+    try { if (c.isSpeedReversed()) r.nested = true; } catch(e){}
+    try { var it = c.projectItem; if (it){ var nested = false; try { nested = it.isSequence(); } catch(e2){} if (nested) r.nested = true; else { var mp = it.getMediaPath(); if (mp) r.path = mp; } } } catch(e3){}
+    rec.clips.push(r);
+  }
+  out.audio.push(rec);
+}
+for (var v=0;v<s.videoTracks.numTracks;v++){ var vt = s.videoTracks[v], names = []; for (var k=0;k<vt.clips.numItems && k<3;k++) names.push(vt.clips[k].name); out.video.push({ index:v, name:vt.name, clips:vt.clips.numItems, first:names }); }
+return out;`;
+
+/** The active project's saved file (where Premiere keeps its transcripts), or null. */
+export const PROJECT_PATH = `var p = app.project; return p && p.path ? p.path : null;`;

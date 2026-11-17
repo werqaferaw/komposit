@@ -86,7 +86,11 @@ export interface StandInOptions {
 }
 
 /** Premiere Pro with two projects open: "Show.prproj" (active; sequence "Podcast", 20 s at
- *  25 fps, three cameras and two mics) and "Client.prproj" (the person's other work). */
+ *  25 fps, three cameras and two mics) and "Client.prproj" (the person's other work). The
+ *  mics' media is "host mic.wav" and "guest mic.wav" in dirs.mediaDir (a test that listens
+ *  writes them). Project items take in and out points; overwriteClip lays an item's piece
+ *  (5 s when it has none) and, for an item with sound (`_audio`), its sound on the audio track
+ *  of the same number, as Premiere does. */
 export function standInPremiere(o: StandInOptions) {
   const { File, Folder } = fileClasses();
   const W = o.w ?? 320, H = o.h ?? 180, FPS = 25;
@@ -100,7 +104,14 @@ export function standInPremiere(o: StandInOptions) {
     writeFileSync(join(appDir, "Contents", "MediaIO", "systempresets", "4E49434B_48323634", n), "<preset/>");
   }
 
-  const item = (name: string, path = "", type = 1): Obj => ({ name, type, nodeId: "i" + ids++, getMediaPath: () => path, isSequence: () => false });
+  const item = (name: string, path = "", type = 1): Obj => {
+    const it: Obj = { name, type, nodeId: "i" + ids++, getMediaPath: () => path, isSequence: () => false, _in: null, _out: null, _audio: false };
+    it.setInPoint = (sec: number) => { it._in = Number(sec); log.push(`setInPoint:${name}:${sec}`); };
+    it.setOutPoint = (sec: number) => { it._out = Number(sec); log.push(`setOutPoint:${name}:${sec}`); };
+    it.clearInPoint = () => { it._in = null; };
+    it.clearOutPoint = () => { it._out = null; };
+    return it;
+  };
   const bin = (name: string): Obj => {
     const b: Obj = { name, type: 2, nodeId: "b" + ids++, children: list([] as Obj[], "numItems"), isSequence: () => false };
     b.createBin = (n: string) => { const c = bin(n); b.children.push(c); log.push(`createBin:${n}`); return c; };
@@ -112,8 +123,21 @@ export function standInPremiere(o: StandInOptions) {
     projectItem: item(name, path), getSpeed: () => 1, isSpeedReversed: () => false, isSelected: () => selected,
   });
   const track = (name: string, clips: Obj[]): Obj => {
-    const t: Obj = { name, clips: list(clips, "numItems"), transitions: list([] as Obj[], "numItems"), isMuted: () => false, isLocked: () => false };
-    t.overwriteClip = (it: Obj, sec: number) => { t.clips.push(clip(it.name, sec, sec + 5)); log.push(`overwriteClip:${t.name}:${it.name}@${sec}`); return true; };
+    const t: Obj = { name, clips: list([] as Obj[], "numItems"), transitions: list([] as Obj[], "numItems"), isMuted: () => false, isLocked: () => false, _twin: null };
+    t._add = (c: Obj) => {
+      c.remove = () => { const i = t.clips.indexOf(c); if (i >= 0) t.clips.splice(i, 1); log.push(`remove:${t.name}:${c.name}@${c.start.seconds}`); return true; };
+      t.clips.push(c);
+      return c;
+    };
+    for (const c of clips) t._add(c);
+    t.overwriteClip = (it: Obj, sec: number) => {
+      const a = it._in ?? 0, len = it._in != null && it._out != null ? it._out - it._in : 5;
+      const piece = () => { const c = clip(it.name, sec, sec + len, it.getMediaPath()); c.inPoint = time(a); c.outPoint = time(a + len); return c; };
+      t._add(piece());
+      if (it._audio && t._twin) t._twin._add(piece());
+      log.push(`overwriteClip:${t.name}:${it.name}@${sec}`);
+      return true;
+    };
     return t;
   };
   const sequence = (name: string, id: string): Obj => {
@@ -121,8 +145,13 @@ export function standInPremiere(o: StandInOptions) {
     const s: Obj = {
       name, sequenceID: id,
       videoTracks: list([track("Video 1", [clip("wide.mp4", 0, 20)]), track("Video 2", [clip("host cam.mp4", 0, 8, "", true), clip("guest cam.mp4", 8, 20)]), track("Video 3", [])], "numTracks"),
-      audioTracks: list([track("Audio 1", [clip("host mic.wav", 0, 20)]), track("Audio 2", [clip("guest mic.wav", 0, 20)])], "numTracks"),
-      markers: { getFirstMarker: () => ({ start: time(2), end: time(2), name: "intro", comments: "" }), getNextMarker: () => null },
+      audioTracks: list([track("Audio 1", [clip("host mic.wav", 0, 20, join(mediaDir, "host mic.wav"))]), track("Audio 2", [clip("guest mic.wav", 0, 20, join(mediaDir, "guest mic.wav"))])], "numTracks"),
+      markers: {
+        getFirstMarker: () => ({ start: time(2), end: time(2), name: "intro", comments: "" }),
+        getNextMarker: () => null,
+        createMarker: (sec: number) => { const m: Obj = { start: time(sec), end: time(sec), name: "", comments: "" }; s._markers.push(m); log.push(`createMarker:${Math.round(sec * 1000) / 1000}`); return m; },
+      },
+      _markers: [] as Obj[],
       getSettings: () => ({ videoFrameWidth: W, videoFrameHeight: H, videoFrameRate: { ticks: String(TPS / FPS), seconds: 1 / FPS }, videoDisplayFormat: 101 }),
       getPlayerPosition: () => time(player),
       getInPointAsTime: () => { const t = new Time(); t.ticks = String(inT); return t; },
@@ -141,6 +170,11 @@ export function standInPremiere(o: StandInOptions) {
       _player: (sec: number) => { player = sec; },
       _inOut: () => [inT, outT],
     };
+    // Each video track lays an item's sound on the audio track of the same number.
+    const twin = () => s.videoTracks.forEach((v: Obj, i: number) => { v._twin = s.audioTracks[i] ?? null; });
+    s._addTrack = (kind: "video" | "audio", name: string) => { const t = track(name, []); (kind === "audio" ? s.audioTracks : s.videoTracks).push(t); twin(); return t; };
+    s._clip = (name: string, start: number, end: number, path = "", srcIn = 0) => { const c = clip(name, start, end, path); c.inPoint = time(srcIn); c.outPoint = time(srcIn + end - start); return c; };
+    twin();
     return s;
   };
   const project = (name: string, docId: string, seqName: string | null): Obj => {
@@ -190,6 +224,14 @@ export function standInPremiere(o: StandInOptions) {
     },
   };
   const qs = (s: () => Obj | null) => ({
+    addTracks: (nv: number, _vAt: number, na = 0) => {
+      const seq = s();
+      if (!seq) return false;
+      for (let i = 0; i < nv; i++) seq._addTrack("video", `Video ${seq.videoTracks.length + 1}`);
+      for (let i = 0; i < na; i++) seq._addTrack("audio", `Audio ${seq.audioTracks.length + 1}`);
+      log.push(`addTracks:${nv}:${na}`);
+      return true;
+    },
     exportFramePNG: (tc: string, out: string) => {
       const sec = secondsOfTc(tc);
       log.push(`exportFramePNG:${Math.round(sec * 1000) / 1000}`);
@@ -223,7 +265,7 @@ export function standInPremiere(o: StandInOptions) {
   };
   const qe = { project: { getActiveSequence: () => qs(() => app.project?.activeSequence ?? null), undo: () => { undos++; log.push("qe.undo"); } } };
   const globals = () => ({ app, qe, Time, File, Folder, ProjectItemType: { CLIP: 1, BIN: 2, ROOT: 3, FILE: 4 }, Sequence: { CAPTION_FORMAT_SUBTITLE: 0 }, $: { os: o.os ?? "Macintosh OS 14.6.1", sleep() {} } });
-  return { app, qe, show, client, globals, log, undos: () => undos, prefs, prefLog, popups: () => popups, dirs: { projDir, mediaDir, appDir } };
+  return { app, qe, show, client, globals, log, undos: () => undos, prefs, prefLog, popups: () => popups, dirs: { projDir, mediaDir, appDir }, item };
 }
 export type StandInPremiere = ReturnType<typeof standInPremiere>;
 

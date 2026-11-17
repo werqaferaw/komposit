@@ -25,6 +25,10 @@ const NOTES = {
     "- Premiere Pro's scripts only reach its active project: pass `doc` (the project's name and path from `documents`) on every call that changes it (`edit`, `undo`, `save`, `place`, and `render` with `video`). A call for a project that isn't the active one, or one that names none, changes nothing and says why; then ask the person to click into the right project.",
     "- Komposit reaches Premiere Pro through its own small panel inside the app. When `apps` says the panel isn't installed or hasn't loaded, pass on what it says.",
     "- To check a cut, `render` with `frames` 2-8. To find or rule something out across a stretch, watch it: `render` with `every` (seconds between frames), `from` and `to` gives contact sheets.",
+    "- Before cutting to music or speech, `listen`: the sequence's sound (who talks when, the pauses, the words when Premiere has transcribed them; a song's tempo, every beat, its bars, sections and strongest hits) in sequence seconds, or one file's with `path`. The next `edit` gets it as `K.heard`, and `K.cutOnBeats`, `K.beats` and `K.markBeats` use it: see cut-to-the-beat and find-the-story below.",
+  ],
+  aftereffects: [
+    "- Before timing anything to sound, `listen`: the comp's layers with sound (a voice's lines and pauses; a song's tempo, every beat, its bars, sections and strongest hits) in comp seconds, or one file's with `path`. The next `edit` gets it as `K.heard`, with `K.beats`, `K.markBeats` and `K.onBeats`: see timing-to-sound below.",
   ],
 };
 

@@ -16,6 +16,8 @@ import { createFakeTransport, fakeFileClass, tinyPng } from "./_kit/fake.ts";
 import type { FakeTransportOptions } from "./_kit/fake.ts";
 import type { Incident } from "./_kit/incidents.ts";
 import { osascriptFailure } from "./_kit/mac.ts";
+import { writeWav } from "./_kit/audio.ts";
+import { drumTrack, effect, speechLike } from "./_kit/soundfixtures.ts";
 import { createAfterEffects } from "./aftereffects/index.ts";
 import { summarizeSelection as aeSummary } from "./aftereffects/summary.ts";
 import { createIllustrator } from "./illustrator/index.ts";
@@ -290,7 +292,8 @@ function afterEffectsDom(log: string[]) {
     findMenuCommandId: (name: string) => (name === "Undo" ? 2371 : 0),
     executeCommand: (id: number) => log.push(id === 16 ? "undo" : `command:${id}`),
   };
-  return { app, globals: () => ({ app, File, CompItem, RQItemStatus: { QUEUED: 1 }, $: { sleep() {} } }) };
+  function MarkerValue(this: { comment: string }, comment: string) { this.comment = comment; }
+  return { app, globals: () => ({ app, File, CompItem, MarkerValue, RQItemStatus: { QUEUED: 1 }, $: { sleep() {} } }) };
 }
 
 interface Rig {
@@ -1080,8 +1083,7 @@ test("guides: 1.0's recipes verbatim, an index and sections on demand", async ()
     return m ? m[1] : "";
   };
   const envelope = /export const ENVELOPE = `([\s\S]*?)`;/.exec(src)![1];
-  // Lines about 1.0's listen tool stay out: v2 has no listen tool (an AI reading them would
-  // call a tool that isn't there).
+  // 1.0's line about its listen tool is back in v2's own words (Timing to sound, checked below).
   const v2Has = (l: string) => !/\blisten tool\b/i.test(l);
   for (const app of ["illustrator", "photoshop", "aftereffects"]) {
     const guide = readFileSync(join(HERE, app, "guide.md"), "utf8");
@@ -1091,12 +1093,17 @@ test("guides: 1.0's recipes verbatim, an index and sections on demand", async ()
   }
 });
 
-test("guides: nothing about tools v2 doesn't have (After Effects had 1.0's listen tool)", async () => {
+test("guides: listening is in After Effects' guide (Timing to sound) and its K helpers are the ones K has", async () => {
   const m = loadConnectors("mac", { transport: createFakeTransport(), scratchDir: keep(mkdtempSync(join(tmpdir(), "kp-guide-"))) });
-  for (const app of ["illustrator", "photoshop", "aftereffects"]) {
+  const ae = await m.get("aftereffects")!.guide!("timing to sound");
+  assert.match(ae, /the listen tool measures the comp's layers that have audio/);
+  const { AE_K } = await import("./aftereffects/toolkit.ts");
+  const K = new Function("comp", `${AE_K} return K;`)(null);
+  for (const h of ae.matchAll(/\bK\.(\w+)\(/g)) assert.equal(typeof K[h[1]!], "function", `K.${h[1]}`);
+  assert.ok(!AE_K.includes("\n"), "one line, so an edit's error lines still match");
+  for (const app of ["illustrator", "photoshop"]) {
     const all = await m.get(app)!.guide!("all");
-    assert.doesNotMatch(all, /\blisten\b|K\.heard/i, `${app}'s guide mentions listening`);
-    assert.doesNotMatch(await m.get(app)!.guide!(), /- listening:/, `${app}'s guide index lists listening`);
+    assert.doesNotMatch(all, /K\.heard/i, `${app} has no timeline`);
   }
 });
 
@@ -1242,5 +1249,81 @@ test("Show in: the document stays in front and the app comes forward (Illustrato
     assert.deepEqual(ae.transport.activated, ["aftereffects"]);
   } finally {
     ae.done();
+  }
+});
+
+// ---------- listening ----------
+
+test("After Effects listens: the comp's layers with sound in comp seconds, a song's beats through its layer's start; K in the next edits; a file never reaches After Effects", async () => {
+  const r = rig("aftereffects", {}, { audioDecoders: [] });
+  try {
+    const R = 16000;
+    writeWav(join(r.dir, "talk.wav"), [speechLike([[0.5, 3.5], [5, 8]], { seconds: 10 })], R);
+    writeWav(join(r.dir, "song.wav"), [drumTrack({ bpm: 120, seconds: 20 }).x], R);
+    const comp = r.dom.app.project.activeItem;
+    const marks: string[] = [];
+    const layer = (index: number, name: string, o: Record<string, unknown>) => ({ index, name, hasAudio: true, audioEnabled: true, timeRemapEnabled: false, stretch: 100, startTime: 0, inPoint: 0, outPoint: 10, property: (p: string) => (p === "Marker" ? { setValueAtTime: (t: number, v: { comment: string }) => marks.push(`${t}:${v.comment}`) } : null), ...o });
+    // A layer without sound whose in and out points move with its start, as in After Effects.
+    const shot = (index: number, name: string, startTime: number, inOff: number, outOff: number) => {
+      let out = startTime + outOff;
+      const L: any = { index, name, hasAudio: false, startTime, _in: inOff };
+      Object.defineProperty(L, "startTime", { get: () => startTime, set: (v: number) => { out += v - startTime; startTime = v; } });
+      Object.defineProperty(L, "inPoint", { get: () => startTime + inOff });
+      Object.defineProperty(L, "outPoint", { get: () => out, set: (v: number) => { out = v; } });
+      return L;
+    };
+    const layers: any[] = [
+      layer(1, "Voice", { source: { file: { fsName: join(r.dir, "talk.wav") } } }),
+      // The song starts at 2 s in the comp, from 2.25 s into the file (its layer starts 0.25 s before the comp does).
+      layer(2, "Song", { startTime: -0.25, inPoint: 2, outPoint: 10, source: { file: { fsName: join(r.dir, "song.wav") } } }),
+      layer(3, "Title", { hasAudio: false }),
+      shot(4, "Shot A", 0, 0.5, 3),
+      shot(5, "Shot B", 1, 0, 3),
+    ];
+    Object.assign(comp, { numLayers: layers.length, layer: (i: number) => layers[i - 1] });
+    const l = await r.c.listen!({});
+    assert.match(l.text, /^Sound of the composition "Main" \(10 s\)/);
+    assert.match(l.text, /L1 "Voice", talk\.wav: a voice/);
+    assert.match(l.text, /L2 "Song", song\.wav: music/);
+    assert.match(l.text, /L3 is comp\.layer\(3\) in an edit\./);
+    assert.doesNotMatch(l.text, /transcribe/i, "no words in After Effects");
+    const h = l.heard as any;
+    assert.equal(h.what, "composition");
+    assert.equal(h.beats.track, 2);
+    assert.ok(Math.abs(h.beats.times[0] - 2) <= 0.03, String(h.beats.times[0]));
+    // The edits that use K get it, with what was heard.
+    const bars = await r.c.run("return K.beats({ bars: true, to: 6 });");
+    assert.deepEqual(bars.result, [2, 4, 6]);
+    const mk = await r.c.run("return K.markBeats(null, { bars: true, to: 6 });");
+    assert.deepEqual(mk.result, { markers: 3, layer: "Song", from: 2, to: 6 });
+    assert.deepEqual(marks, ["2:Bar 1", "4:Bar 2", "6:Bar 3"]);
+    const moved = await r.c.run("return K.onBeats([comp.layer(4), comp.layer(5)], { beats: 2, from: 3, hold: true });");
+    assert.equal(moved.ok, true, moved.error);
+    assert.deepEqual([layers[3].inPoint, layers[3].outPoint, layers[4].inPoint], [3, 4, 4], "each layer starts on its beat and holds to the next cut");
+    const plain = r.transport.calls.length;
+    await r.c.run("return 1;");
+    assert.ok(!r.transport.calls[plain]!.source.includes("var K = "), "an edit without K gets none");
+    // A file by its path: heard here, and nothing is sent to After Effects.
+    const before = r.transport.calls.length;
+    const f = await r.c.listen!({ path: join(r.dir, "song.wav") });
+    assert.match(f.text, /^Sound of song\.wav: 20 s/);
+    assert.equal(r.transport.calls.length, before);
+    const fileBeats = await r.c.run("return K.beats({ to: 3 });");
+    assert.match(fileBeats.error!, /K\.heard is the file song\.wav, in its own seconds: pass at/);
+  } finally {
+    r.done();
+  }
+});
+
+test("Illustrator and Photoshop listen to a file by its path only, without the app", async () => {
+  const r = rig("photoshop", {}, { audioDecoders: [] });
+  try {
+    writeWav(join(r.dir, "hit.wav"), [effect("hit", { at: 0.4, seconds: 2 })], 16000);
+    const l = await r.c.listen!({ path: join(r.dir, "hit.wav") });
+    assert.match(l.text, /A short sound effect: a hit at 0\.4\d? s/);
+    assert.equal(r.transport.calls.length, 0);
+    await assert.rejects(r.c.listen!({}), /Photoshop has no timeline to listen to: pass path/);
+  } finally {
+    r.done();
   }
 });

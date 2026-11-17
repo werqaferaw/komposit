@@ -72,7 +72,7 @@ test("tools/list: the standalone tools, in order, app required, refuse wording",
   const c = await connect();
   try {
     const { tools } = (await c.request("tools/list")).result;
-    assert.deepEqual(tools.map((t: any) => t.name), ["apps", "documents", "inspect", "edit", "render", "export", "save", "undo", "preflight", "place", "open", "new_document", "guide"]);
+    assert.deepEqual(tools.map((t: any) => t.name), ["apps", "documents", "inspect", "edit", "render", "listen", "export", "save", "undo", "preflight", "place", "open", "new_document", "guide"]);
     for (const t of tools) {
       assert.equal(typeof t.description, "string");
       assert.equal(t.inputSchema.type, "object");
@@ -108,6 +108,30 @@ test("apps and documents; a closed app is never started", async () => {
     assert.equal(closed.isError, true);
     assert.match(textOf(closed), /After Effects isn't open\. Ask the person to open it/);
     assert.ok(!ops().slice(before).some((o) => o.app === "aftereffects"), "nothing reached the closed app");
+  } finally {
+    await c.close();
+  }
+});
+
+test("listen: a file by its path is heard with its app closed; the timeline needs the app open", async () => {
+  const c = await connect();
+  try {
+    const song = join(home, "song.wav");
+    writeFileSync(song, "RIFF");
+    const before = ops().length;
+    const r = await c.call("listen", { app: "aftereffects", path: song });
+    assert.ok(!r.isError, textOf(r));
+    assert.match(textOf(r), /^Sound of song\.wav: 120 BPM\./);
+    assert.equal(r.content.filter((x) => x.type === "image").length, 1, "and a picture of it");
+    assert.deepEqual(ops().slice(before).map((o) => [o.app, o.op, o.path]), [["aftereffects", "listen", song]]);
+    const missing = await c.call("listen", { app: "aftereffects", path: join(home, "nope.wav") });
+    assert.equal(missing.isError, true);
+    assert.match(textOf(missing), /there's no file at/);
+    const closed = await c.call("listen", { app: "aftereffects" });
+    assert.equal(closed.isError, true);
+    assert.match(textOf(closed), /After Effects isn't open/);
+    const open = await c.call("listen", { app: "illustrator", from: 2 });
+    assert.match(textOf(open), /a voice/);
   } finally {
     await c.close();
   }

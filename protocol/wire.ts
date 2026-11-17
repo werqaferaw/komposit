@@ -83,6 +83,23 @@ export interface AiStatus {
   /** Installed but can't start (an update that didn't finish); `reinstall` is the command that fixes it. */
   broken?: boolean;
   reinstall?: string;
+  /** "plan": the person's own AI program on their own plan (Claude Code, Codex, Gemini CLI).
+   *  "key": Komposit's own loop on the person's API key, which stays on this computer. */
+  kind?: "plan" | "key";
+  /** An API key AI: the model it runs, and the provider's current models to offer. */
+  model?: string;
+  models?: string[];
+  /** An API key AI with a key saved: its last four characters, to recognise it by (never more). */
+  keyHint?: string;
+}
+
+/** What saving, testing or removing an API key answers. `message`: one plain sentence (why it
+ *  didn't work, or which model it will run). The key itself never comes back. */
+export interface KeyResult {
+  ok: boolean;
+  message?: string;
+  /** The AI's status after it. */
+  status?: AiStatus;
 }
 
 export interface AccountInfo {
@@ -181,6 +198,16 @@ export interface Methods {
 
   /** `fresh`: check again now instead of using a recent answer (after signing in). */
   "ai.list": { params: { fresh?: boolean }; result: AiStatus[] };
+  /** An API key for an AI that runs on one (kind "key": "api-anthropic", "api-openai",
+   *  "api-gemini", "api-openrouter"). The key is checked with that provider, and only that
+   *  provider, before it is kept (encrypted with this computer's keychain); it never goes to
+   *  Komposit's servers and is never logged. Without `key`, the saved one stays and only `model`
+   *  changes; `model` "" goes back to the provider's default. */
+  "ai.setKey": { params: { ai: AiId; key?: string; model?: string }; result: KeyResult };
+  /** Checks a key with its provider without keeping it (`key`), or the saved one (no `key`). */
+  "ai.testKey": { params: { ai: AiId; key?: string; model?: string }; result: KeyResult };
+  /** Forgets the saved key. */
+  "ai.deleteKey": { params: { ai: AiId }; result: KeyResult };
   "account.get": { params: Record<string, never>; result: AccountInfo };
   /** Opens the system browser for Google, through Komposit's gateway; resolves signed in, or
    *  fails with a plain sentence when it didn't finish (cancelled, too slow, unavailable). */

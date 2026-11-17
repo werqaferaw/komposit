@@ -6,7 +6,7 @@ import type { ToolDef } from "../protocol/tools.ts";
 import { appToolDefs, supportedAppTools, withTarget } from "../toolkit/tools.ts";
 
 export const MCP_TOOL_ORDER = [
-  "apps", "documents", "inspect", "edit", "render", "export", "save", "undo", "preflight", "place", "open", "new_document", "guide",
+  "apps", "documents", "inspect", "edit", "render", "listen", "export", "save", "undo", "preflight", "place", "open", "new_document", "guide",
 ] as const;
 
 /** Tools that change a document or write a file (everything else only reads). */

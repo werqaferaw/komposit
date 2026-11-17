@@ -102,6 +102,29 @@ export function appToolDefs(MOD: string, opts: AppToolOptions = {}): Record<stri
         required: [],
       },
     },
+    listen: {
+      name: "listen",
+      appScoped: true,
+      readOnly: true,
+      description:
+        "Listen to sound. Measured on this computer with signal maths: read-only, nothing is sent anywhere. " +
+        "Premiere Pro: the sequence being worked in, every audio track as laid out (each clip where it sits, at its speed), in sequence seconds. After Effects: the comp being worked in, each layer with sound, in comp seconds. " +
+        "Any app: pass path to listen to one media file instead (a song, a voice-over, footage, a sound effect), in the file's own seconds; in Premiere Pro that includes the file's words when the project has it transcribed, whether or not it's on a timeline. " +
+        "Speech: where each voice has sound and where the pauses are, who is talking when (a mic per person), people talking over each other, and the words with their times when Premiere Pro has transcribed the clips. " +
+        "Music: the tempo, every beat (followed through the song, not a fixed grid), the bars, the sections (quiet and loud stretches, builds, drops, breaks) and where the strongest hits land. A short sound effect: where it hits and how it builds and rings. Loudness (LUFS), peak and quiet floor for each. " +
+        "Returns the numbers as text and a picture of the sound (a row per track, beats as ticks, bars taller, sections as a strip under the music). What it heard stays available to the next edits as K.heard (in Premiere Pro, K.beats, K.markBeats and K.cutOnBeats use it). " +
+        "Use it before cutting to music or speech: cutting on the beat, following the song's sections, a montage to a song, removing dead air, multicam by speaker, ducking music under a voice, captions in time with the words. Listen again after moving or trimming things.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "A media file to listen to (absolute path) instead of the timeline." },
+          from: { type: "number", description: "Listen from this second (default: the start). Use from and to to look closer at part of a long timeline or file." },
+          to: { type: "number", description: "Listen up to this second (default: the end)." },
+          pauses: { type: "number", description: "The shortest pause worth listing, in seconds (default 0.6)." },
+        },
+        required: [],
+      },
+    },
     export: {
       name: "export",
       appScoped: true,
@@ -311,7 +334,7 @@ export const PROJECT_TOOLS: Record<string, ToolDef> = {
   },
 };
 
-export const APP_TOOL_ORDER = ["inspect", "edit", "undo", "render", "export", "save", "preflight", "dialog", "place", "open", "guide"];
+export const APP_TOOL_ORDER = ["inspect", "edit", "undo", "render", "listen", "export", "save", "preflight", "dialog", "place", "open", "guide"];
 /** Tools every run gets, whatever the apps. */
 export const GENERAL_TOOL_ORDER = ["ask"];
 export const PROJECT_TOOL_ORDER = ["write_file", "make_folder", "copy", "move", "trash", "find_files", "read_file"];
@@ -327,6 +350,7 @@ export function supportedAppTools(manifests: ConnectorManifest[]): Set<string> {
     if (c.run) out.add("edit");
     if (c.undo) out.add("undo");
     if (c.render) out.add("render");
+    if (c.listen) out.add("listen");
     if (c.export?.length) out.add("export");
     if (c.save?.length) out.add("save");
     if (c.preflight) out.add("preflight");

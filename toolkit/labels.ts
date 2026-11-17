@@ -64,6 +64,7 @@ export function stepLabel(name: string, input: Input = {}, appLabel?: string): s
   }
   if (n === "read_file" && readsWhat(input)) return readsWhat(input);
   if (n === "save" && input?.mode === "as") return "Saving as a new file";
+  if (n === "listen" && fileOf(input)) return `Listening to ${fileOf(input)}`;
   if (n === "place" && fileOf(input)) return `Bringing ${fileOf(input)}${into}`;
   if (n === "open" && fileOf(input)) return `Opening ${fileOf(input)}${inApp}`;
   if (n === "edit" && input && input.explanation) return sentence(input.explanation);
@@ -84,6 +85,7 @@ export function doneLabel(name: string, input: Input = {}, isError = false, appL
     if (n === "edit") return "That edit failed, adjusting";
     if (n === "render") return "Could not render a preview";
     if (n === "inspect") return "Could not read the document";
+    if (n === "listen") return "Couldn't listen to the sound";
     if (n === "export") return "The export didn't work";
     if (n === "save") return "Couldn't save";
     if (n === "place") return `Couldn't bring ${fileOf(input) || "the file"} in`;
@@ -110,6 +112,7 @@ export function doneLabel(name: string, input: Input = {}, isError = false, appL
   if (n === "find_files") return "Looked through the project";
   if (n === "read_file" && readsWhat(input)) return readsWhat(input).replace(/^Reading/, "Read");
   if (n === "preflight") return "Checked print readiness";
+  if (n === "listen" && fileOf(input)) return `Listened to ${fileOf(input)}`;
   if (n === "listen") return "Listened to the audio";
   if (n === "undo") return "Undid the last change";
   if (n === "guide") return "Read the app's recipes";

@@ -9,6 +9,7 @@ import type { Connector, ConnectorManifest, FileResult, RunResult } from "../../
 import { answerOrRead, appStatus, dataOf, fileFailure, outputPath, pngPicture, runResult, watching } from "../_kit/adobe.ts";
 import type { CallOptions, Kit } from "../_kit/adobe.ts";
 import { guideLoader } from "../_kit/guide.ts";
+import { listenToFileOnly } from "../_kit/listening.ts";
 import { moveNew } from "../_kit/files.ts";
 import { readAndRemove } from "../_kit/scratch.ts";
 import { KitError } from "../_kit/transport.ts";
@@ -37,6 +38,7 @@ export const manifest: ConnectorManifest = {
     open: true,
     place: true,
     dialog: true,
+    listen: true,
   },
   heavy: ["render", "export", "inspect"],
 };
@@ -216,6 +218,13 @@ export function createIllustrator(kit: Kit): Connector {
     },
 
     guide: guideLoader(new URL("./guide.md", import.meta.url)),
+
+    // Illustrator has no timeline: listening hears a file by its path, on this computer, and never
+    // reaches Illustrator.
+    async listen(o) {
+      const r = await listenToFileOnly(kit.ear, "Illustrator", o);
+      return { text: r.text, picture: r.picture, heard: r.heard };
+    },
 
     dialog: (action, button) => answerOrRead(kit, APP, action, button),
   };

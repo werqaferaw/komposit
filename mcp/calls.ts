@@ -6,7 +6,8 @@
 //   - nothing is saved unless the save tool is called: scripts that save are refused;
 //   - scripts the toolkit's script check flags are refused, unless the person started the
 //     server with KOMPOSIT_ALLOW_RISKY_SCRIPTS=1;
-//   - pictures come back as MCP image content.
+//   - pictures come back as MCP image content;
+//   - listening to a file by its path is done on this computer and needs no app open.
 import { basename, isAbsolute, resolve } from "node:path";
 import type { AppStatus, DocRef } from "../protocol/common.ts";
 import type { Connector, FileResult, Picture, RunResult } from "../protocol/connector.ts";
@@ -163,6 +164,19 @@ async function appTool(
     input = { ...input, path: resolve(expanded) };
   }
 
+  // Listening to a file: heard on this computer, so the app needn't be open (Premiere Pro adds
+  // the file's words when its panel answers).
+  const listenOpts: { path?: string; from?: number; to?: number; pauses?: number } = name === "listen" ? pick(input, ["from", "to", "pauses"]) : {};
+  if (name === "listen") {
+    if (!connector.listen) return fail(`${label} can't listen from Komposit.`);
+    if (input.path != null && String(input.path).trim() !== "") {
+      const given = expandHome(String(input.path), ctx.rules.home);
+      if (!isAbsolute(given) || !isFile(resolve(given))) return fail(`listen failed: there's no file at "${input.path}". Use an absolute path to a media file that exists.`);
+      listenOpts.path = resolve(given);
+      return listened(await ctx.lanes.run(app, () => connector.listen!(listenOpts, undefined, signal ? { signal } : undefined), signal));
+    }
+  }
+
   // Never start an app the person didn't open (a script sent to a closed app would).
   const status = await connector.status();
   if (!status.running) return fail(`${label} isn't open. Ask the person to open it; Komposit never opens apps by itself.`);
@@ -205,6 +219,10 @@ async function appTool(
       const pics = r.pictures?.length ? r.pictures : r.picture ? [r.picture] : [];
       const video = r.videoPath && isFile(r.videoPath) ? `\nA preview video was rendered to ${r.videoPath} (a temporary file; export mp4 makes a full one to keep).` : "";
       return { content: [{ type: "text", text: `${r.note ? `Rendered ${r.note}.` : "Rendered."}${video}` }, ...pics.map(image)] };
+    }
+
+    case "listen": {
+      return listened(await inLane(() => connector.listen!(listenOpts, doc, call)));
     }
 
     case "export": {
@@ -266,6 +284,11 @@ async function appTool(
     }
   }
   return fail(`There's no tool called "${name}" here.`);
+}
+
+/** What listening heard: the numbers, and the picture of the sound. */
+function listened(r: { text: string; picture?: Picture }): ToolResult {
+  return { content: [{ type: "text", text: r.text }, ...(r.picture ? [image(r.picture)] : [])] };
 }
 
 /** The document's name without its extension ("Poster.ai" -> "Poster"), for new file names. */

@@ -46,3 +46,12 @@ How your edit script talks back to you:
 
 ## Checking motion
 - To check motion, render with frames: 4-6; when it's done, render once with video: true so the user can watch it.
+
+## Timing to sound
+- Hear the comp before you time anything to sound: the listen tool measures the comp's layers that have audio on this computer (each one's level, where it has sound, the pauses, who is loudest when across them, and for music its tempo, every beat, the bars, the sections and the strongest hits), in comp seconds. Listen with path to hear a file that isn't in the comp (a song, a voice-over, a sound effect), in the file's own seconds.
+- In the edits after it, K.heard holds it: { what: 'composition', name, id, duration, tracks: [{ track (the layer's index), name, kind: 'voice'|'music'|'silent', sound: [[start, end]], pauses }], turns, nobody, beats: { track, bpm, interval, first, times: [every beat], bars: [the first beat of each bar], meter, barsSure }, sections: [{ start, end, level: 'quiet'|'medium'|'loud', kind: 'build'|'drop'|'break'|'outro' }], hits: [{ t, strength, beat, bar }] }. After moving or trimming layers, listen again.
+  K.beats({ from, to, every: 2, bars: true })  the heard beats (or bars), every nth one, on the comp's frames. For a file heard by path, pass at (where it starts in the comp) and songIn (the second of it that plays there).
+  K.markBeats(layer, { bars: true })  layer markers on the beats or bars (no layer: the music's own layer).
+  K.onBeats([layer, ...], { beats: 2, from: 4, hold: true })  moves each layer so it starts on a beat, every that many beats; hold ends each one where the next begins.
+- Land motion on the music: the big move on a drop or one of the strongest hits, a settle in a break, keyframes on beats (setValueAtTime at K.beats() times). A sound effect heard by path says where its peak is: start its layer that many seconds before the moment it should hit.
+- A voice's sound ranges say when each line starts and ends: bring text in a few frames before a range starts and hold it to its end. There are no words in After Effects (only where the sound is): for lyrics or captions, take the lines from the user, lay them on the sound ranges in order, and say they may want nudging.

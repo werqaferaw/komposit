@@ -13,17 +13,26 @@
 //   - an edit can't save, open, close or switch projects, or reach into other open projects;
 //   - nothing saves the project except save, which only runs when the person asked to save;
 //   - exports, renders and saved copies never write over a file.
-// Reads (documents, inspect, selection, renders, exports) work on the active project.
+// Reads (documents, inspect, selection, renders, exports, listening) work on the active project.
+//
+// Listening (new in v2, ported from 1.0's listen and listenToFile): the request's sequence's
+// sound, measured on this computer (_kit/listening.ts), plus the words Premiere's own
+// transcription keeps in the saved project (_kit/transcripts.ts). What it heard goes in front
+// of the next edits that use it (K.heard, K.beats, K.cutOnBeats...).
 import { execFile } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import type { AppStatus, DocRef, PluginState } from "../../protocol/common.ts";
-import type { Connector, ConnectorManifest, FileResult, Picture, RunResult } from "../../protocol/connector.ts";
+import type { Connector, ConnectorManifest, FileResult, ListenOptions, ListenResult, Picture, RunResult } from "../../protocol/connector.ts";
 import { dataOf, fileFailure, outputPath, pngPicture, runResult, watching } from "../_kit/adobe.ts";
 import type { CallOptions, Kit } from "../_kit/adobe.ts";
 import { wrap } from "../_kit/envelope.ts";
 import type { Envelope } from "../_kit/envelope.ts";
 import { moveNew } from "../_kit/files.ts";
 import { guideLoader } from "../_kit/guide.ts";
+import { createHeardShelf, heardAssignment, listenFile, listenTimeline } from "../_kit/listening.ts";
+import type { TimelineLayout } from "../_kit/listening.ts";
+import { createTranscriptReader, wordsOfFile, wordsOnTimeline } from "../_kit/transcripts.ts";
+import type { Words } from "../_kit/transcripts.ts";
 import { readAndRemove, rmQuiet } from "../_kit/scratch.ts";
 import { KitError } from "../_kit/transport.ts";
 import { createPanelDoor } from "./door.ts";
@@ -33,7 +42,7 @@ import { refuseScript } from "./scriptcheck.ts";
 import * as S from "./scripts.ts";
 import { contactSheets, smallerPng } from "./sheets.ts";
 import { summarizeSelection } from "./summary.ts";
-import { K_LIB } from "./toolkit.ts";
+import { K_LIB, USES_HEARD } from "./toolkit.ts";
 
 const APP = "premiere";
 const LABEL = "Premiere Pro";
@@ -55,6 +64,7 @@ export const manifest: ConnectorManifest = {
     selection: true,
     place: true,
     open: true,
+    listen: true,
   },
   heavy: ["render", "export", "inspect"],
   partLabel: "sequence",
@@ -333,6 +343,61 @@ export function createPremiere(kit: Kit, o: PremiereOptions = {}): Connector {
 
   const projectName = (doc?: DocRef) => String(doc?.name || "project").replace(/\.prproj$/i, "");
 
+  // What the last listen heard (the next edits that name it get it as K.heard), and the saved
+  // project's transcripts (read again only when the file changes).
+  const heard = createHeardShelf();
+  const transcripts = createTranscriptReader();
+  const NOT_TRANSCRIBED = `No words yet: these clips aren't transcribed in ${LABEL}. To read what is said, the user transcribes them in ${LABEL} (Window > Text > Transcribe, or Settings > Transcription > transcribe automatically) and saves the project; then listen again.`;
+
+  async function listen(o: ListenOptions = {}, doc?: DocRef, call?: CallOptions): Promise<ListenResult> {
+    const opts = { ...(o.from != null ? { from: Number(o.from) } : {}), ...(o.to != null ? { to: Number(o.to) } : {}), ...(o.pauses != null ? { pauses: Number(o.pauses) } : {}) };
+    if (o.path) {
+      // One file, with its words when the open project has it transcribed (it needn't be on a
+      // timeline). Premiere not answering only means no words.
+      let words: Words | null = null, others: string[] = [];
+      try {
+        const env = await send(S.PROJECT_PATH, undefined, 15000, call);
+        const all = env.ok && typeof env.data === "string" ? transcripts(env.data) : [];
+        words = wordsOfFile(o.path, all);
+        others = all.filter((t) => t.path && t.path !== o.path).map((t) => t.name);
+      } catch { /* no words */ }
+      const note = `No words for this file: it isn't transcribed in the open ${LABEL} project (or the project wasn't saved since). The user transcribes it in ${LABEL} (Window > Text > Transcribe) and saves the project; then listen again.${others.length ? ` Transcribed already: ${others.slice(0, 12).join(", ")}${others.length > 12 ? ` and ${others.length - 12} more` : ""}.` : ""}`;
+      const r = await listenFile(kit.ear, o.path, { ...opts, words, wordsNote: note });
+      heard.set(r.heard);
+      return { text: r.text, picture: r.picture, heard: r.heard };
+    }
+    const d = dataOf<any>(await send(S.LISTEN_LAYOUT, doc, 60000, call));
+    if (d.noDocument) throw new KitError(`No project open in ${LABEL}.`, "NO_DOCUMENT");
+    if (d.noSequence) throw new KitError(`No sequence open in ${LABEL}. To hear a file that isn't on a timeline (a song to cut to), pass its path.`, "NO_SEQUENCE");
+    const layout: TimelineLayout = {
+      name: String(d.name),
+      id: String(d.id),
+      duration: Number(d.duration) || 0,
+      what: "sequence",
+      ref: "A1 is audio track 0 in an edit (seq.audioTracks[0]).",
+      wordsHint: NOT_TRANSCRIBED,
+      audio: (d.audio || []).map((t: any) => ({ index: t.index, name: t.name, ...(t.muted ? { muted: true } : {}), clips: t.clips })),
+      video: d.video || [],
+    };
+    if (!layout.audio.some((t) => t.clips.length)) throw new KitError(`The sequence "${layout.name}" has no audio clips to listen to. To hear a file that isn't on it (a song to cut to), pass its path.`, "NO_AUDIO");
+    // Words: Premiere's transcripts in the saved project, laid on this timeline; failing
+    // that, a transcript Premiere made of the sequence itself.
+    let words: Words | null = null;
+    try {
+      const all = transcripts(String(d.project));
+      if (all.length) {
+        words = wordsOnTimeline(layout.audio.flatMap((t) => t.clips.filter((c) => !c.disabled && !c.nested)), all);
+        if (!words.words.length) {
+          const own = all.find((t) => !t.path && t.name === layout.name);
+          words = own ? wordsOnTimeline([{ name: own.name, path: null, start: 0, end: layout.duration, srcIn: 0, srcOut: layout.duration }], [own]) : null;
+        }
+      }
+    } catch { /* no words */ }
+    const r = await listenTimeline(kit.ear, layout, { ...opts, words });
+    heard.set(r.heard);
+    return { text: r.text, picture: r.picture, heard: r.heard };
+  }
+
   const connector: Connector = {
     manifest,
 
@@ -404,11 +469,15 @@ export function createPremiere(kit: Kit, o: PremiereOptions = {}): Connector {
         return { ok: false, error: no, logs: [] };
       }
       if (!doc) return runResult(refused(needsProject("An edit")));
-      const env = await watching(kit, APP, call, () => send(code, doc, 180000, call, K_LIB + " "));
+      // What listening heard, on the same line as K, when the edit uses it.
+      const prefix = K_LIB + (USES_HEARD.test(code) ? heardAssignment(heard.get()) : "") + " ";
+      const env = await watching(kit, APP, call, () => send(code, doc, 180000, call, prefix));
       return runResult(env);
     },
 
     render,
+
+    listen,
 
     // A new file; the project is left as it was.
     async exportCopy({ doc, format, name, outputDir }, call?: CallOptions): Promise<FileResult> {

@@ -30,7 +30,7 @@ test("the bundle runs on its own and serves the guides", { skip: !supported && "
       const init = await c.request("initialize", { protocolVersion: "2025-06-18", capabilities: {} });
       assert.equal(init.result.serverInfo.name, "komposit-mcp");
       const { tools } = (await c.request("tools/list")).result;
-      assert.deepEqual(tools.map((t: any) => t.name), ["apps", "documents", "inspect", "edit", "render", "export", "save", "undo", "preflight", "place", "open", "new_document", "guide"]);
+      assert.deepEqual(tools.map((t: any) => t.name), ["apps", "documents", "inspect", "edit", "render", "listen", "export", "save", "undo", "preflight", "place", "open", "new_document", "guide"]);
       for (const app of ["illustrator", "photoshop", "aftereffects"]) {
         const g = await c.call("guide", { app });
         assert.ok(!g.isError, textOf(g));

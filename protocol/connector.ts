@@ -28,6 +28,9 @@ export interface ConnectorManifest {
     undo: boolean;
     selection?: boolean;
     preflight?: boolean;
+    /** listen: hears sound on this computer. A file (ListenOptions.path) in any app that has
+     *  it; a timeline (Premiere Pro's sequence, After Effects' comp) where there is one. */
+    listen?: boolean;
     newDocument?: boolean;
     open?: boolean;
     place?: boolean;
@@ -77,6 +80,26 @@ export interface FileResult {
   sourceUnchanged?: boolean;
 }
 
+export interface ListenOptions {
+  /** A media file to listen to (absolute path) instead of the timeline. */
+  path?: string;
+  /** From this second (default: the start). */
+  from?: number;
+  /** Up to this second (default: the end). */
+  to?: number;
+  /** The shortest pause worth listing, seconds (default 0.6). */
+  pauses?: number;
+}
+
+export interface ListenResult {
+  /** What was heard, in plain numbers, for the AI. */
+  text: string;
+  /** The sound as a picture: one row per track, beats and sections marked. */
+  picture?: Picture;
+  /** The same facts as data (what edits get as K.heard). */
+  heard?: unknown;
+}
+
 /** How Komposit's steps start in an app's undo history ("Komposit: Recolour the title"), so they
  *  can be told from the person's own. */
 export const UNDO_LABEL = "Komposit: ";
@@ -114,6 +137,11 @@ export interface Connector {
   save(opts: { doc?: DocRef; mode: string; name?: string; outputDir?: string }): Promise<FileResult>;
   undo(doc?: DocRef, steps?: number): Promise<RunResult>;
   preflight?(doc?: DocRef): Promise<{ text: string; issues: unknown[] }>;
+  /** Hear sound: one media file (`path`, in the file's own seconds), or the document's
+   *  timeline (the request's sequence or comp, in its seconds). Read-only: measured on this
+   *  computer, nothing changes in the app. What it heard stays with the connector for the next
+   *  edits (K.heard). */
+  listen?(opts: ListenOptions, doc?: DocRef, call?: ConnectorCallOptions): Promise<ListenResult>;
   /** After Effects makes a comp in the open project: it returns the project, with `comp`. */
   /** `seconds`: the length of a new After Effects comp (other apps ignore it). */
   newDocument?(opts: { width?: number; height?: number; name?: string; seconds?: number }): Promise<DocRef & { comp?: string }>;

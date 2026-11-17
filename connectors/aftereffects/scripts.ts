@@ -266,3 +266,22 @@ try {
   return { placed: decodeURI(f.name), item: item.name, kind: (item instanceof CompItem) ? "composition" : "footage", addedTo: layerName ? target.name : null, layer: layerName, project: __kpName(app.project) };
 } finally { app.endUndoGroup(); }`;
 }
+
+// Listening (ported from 1.0's listen()): the request's comp as a timeline of sound. Each
+// layer with sound is a track (L3 is comp.layer(3)): its source file, its in and out point,
+// when its source starts and its stretch. Precomps and time-remapped layers aren't followed.
+// Read-only.
+export const LISTEN_LAYOUT = `
+if (!comp) throw new Error('No composition open in After Effects to listen to.');
+var out = { name: comp.name, id: String(comp.id), duration: comp.duration, layers: [] };
+for (var i = 1; i <= comp.numLayers; i++) {
+  var L = comp.layer(i), has = false;
+  try { has = L.hasAudio; } catch (e) {}
+  if (!has) continue;
+  var r = { index: i, name: L.name, start: L.inPoint, end: L.outPoint, startTime: L.startTime, stretch: L.stretch };
+  try { if (!L.audioEnabled) r.muted = true; } catch (e) {}
+  try { if (L.timeRemapEnabled) r.remapped = true; } catch (e) {}
+  try { var s = L.source; if (s instanceof CompItem) r.nested = true; else if (s && s.file) r.path = s.file.fsName; else if (s && s.mainSource && s.mainSource.file) r.path = s.mainSource.file.fsName; } catch (e) {}
+  out.layers.push(r);
+}
+return out;`;

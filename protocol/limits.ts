@@ -1,9 +1,9 @@
 // An AI plan's usage limit, said the same way by the core (the record, the notification) and the
 // window (which says "has reset" once the time has passed). Plain JavaScript: no Node, no DOM.
 
-const WHO: Record<string, string> = { "claude-code": "Claude", codex: "ChatGPT" };
+const WHO: Record<string, string> = { "claude-code": "Claude", codex: "ChatGPT", gemini: "Gemini" };
 
-/** The plan's name, as people say it: "Claude", "ChatGPT". */
+/** The plan's name, as people say it: "Claude", "ChatGPT", "Gemini". */
 export const limitWho = (ai: string | undefined): string => WHO[String(ai || "")] || "Your AI";
 
 /** When it resets, in this computer's time: "at 11:20", "tomorrow at 09:00", "on Friday at 15:00". */

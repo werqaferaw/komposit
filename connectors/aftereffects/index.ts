@@ -5,16 +5,24 @@
 //
 // On a Mac, scripts go to the After Effects that's open, whatever its year (mac.ts:
 // aeTarget); AE_APP overrides the app name.
+//
+// Listening (1.0's listen, back in v2): the comp's layers with sound, heard on this computer
+// (_kit/listening.ts); a file by its path never reaches After Effects at all. What it heard
+// goes in front of the next edits that use K (K.heard, K.beats, K.markBeats, K.onBeats).
 import { existsSync, statSync } from "node:fs";
+import { basename } from "node:path";
 import type { DocRef } from "../../protocol/common.ts";
-import type { Connector, ConnectorManifest, FileResult, Picture, RunResult } from "../../protocol/connector.ts";
+import type { Connector, ConnectorManifest, FileResult, ListenOptions, ListenResult, Picture, RunResult } from "../../protocol/connector.ts";
 import { answerOrRead, appStatus, dataOf, fileFailure, outputPath, pngPicture, runResult, watching } from "../_kit/adobe.ts";
 import type { CallOptions, Kit } from "../_kit/adobe.ts";
 import { guideLoader } from "../_kit/guide.ts";
+import { createHeardShelf, heardAssignment, listenFile, listenTimeline } from "../_kit/listening.ts";
+import type { TimelineLayout } from "../_kit/listening.ts";
 import { readAndRemove, rmQuiet } from "../_kit/scratch.ts";
 import { KitError } from "../_kit/transport.ts";
 import * as S from "./scripts.ts";
 import { summarizeSelection } from "./summary.ts";
+import { AE_K, USES_K } from "./toolkit.ts";
 
 const APP = "aftereffects";
 /** Longest a step waits for a dialog that's up before it can send its script. */
@@ -48,6 +56,7 @@ export const manifest: ConnectorManifest = {
     place: true,
     dialog: true,
     singleDocument: true,
+    listen: true,
   },
   heavy: ["render", "export", "inspect"],
   partLabel: "comp",
@@ -61,7 +70,38 @@ export interface AeRender {
   note?: string;
 }
 
+/** A comp's layers with sound as a timeline for listening: each layer is a track (L3 is
+ *  comp.layer(3)); its sound sits from its in point to its out point, read from the source at
+ *  (comp time - startTime) / stretch. Precomps, time-remapped, reversed or empty layers aren't
+ *  followed. */
+export function compLayout(d: { name: string; id?: string; duration: number; layers?: any[] }): TimelineLayout {
+  const audio = (d.layers || []).map((l) => {
+    const start = Math.max(0, Number(l.start)), end = Math.min(Number(d.duration), Number(l.end));
+    const speed = 100 / (Number(l.stretch) || 100);
+    const odd = !!(l.nested || l.remapped) || !(speed > 0) || !(end > start);
+    return {
+      index: Number(l.index),
+      label: `L${l.index}`,
+      name: String(l.name),
+      ...(l.muted ? { muted: true } : {}),
+      clips: [{
+        name: l.path ? basename(String(l.path)) : String(l.name),
+        path: odd ? null : l.path || null,
+        start,
+        end: Math.max(start, end),
+        srcIn: odd ? 0 : (start - Number(l.startTime)) * speed,
+        srcOut: odd ? 0 : (end - Number(l.startTime)) * speed,
+        ...(odd ? { nested: true } : {}),
+      }],
+    };
+  });
+  return { name: d.name, ...(d.id ? { id: String(d.id) } : {}), duration: Number(d.duration), what: "composition", ref: "L3 is comp.layer(3) in an edit.", wordsHint: null, audio };
+}
+
 export function createAfterEffects(kit: Kit): Connector {
+  // What the last listen heard, for the next edits that use K.
+  const heard = createHeardShelf();
+
   const script = (code: string, doc: DocRef | undefined, timeoutMs: number, call?: CallOptions) =>
     kit.runner.file(APP, code, {
       guard: S.guard(doc, call?.label),
@@ -120,11 +160,28 @@ export function createAfterEffects(kit: Kit): Connector {
     },
 
     async run(code: string, doc?: DocRef, call?: CallOptions): Promise<RunResult> {
-      const env = await watching(kit, APP, call, () => script(code, doc, 180000, call));
+      // K (what listening heard and its helpers) on the edit's first line, only when it uses K.
+      const full = USES_K.test(code) ? AE_K + heardAssignment(heard.get()) + " " + code : code;
+      const env = await watching(kit, APP, call, () => script(full, doc, 180000, call));
       return runResult(env);
     },
 
     render,
+
+    // A file by its path never reaches After Effects; the comp's layers do (one read).
+    async listen(o: ListenOptions = {}, doc?: DocRef, call?: CallOptions): Promise<ListenResult> {
+      const opts = { ...(o.from != null ? { from: Number(o.from) } : {}), ...(o.to != null ? { to: Number(o.to) } : {}), ...(o.pauses != null ? { pauses: Number(o.pauses) } : {}) };
+      if (o.path) {
+        const r = await listenFile(kit.ear, o.path, opts);
+        heard.set(r.heard);
+        return { text: r.text, picture: r.picture, heard: r.heard };
+      }
+      const d = dataOf<any>(await script(S.LISTEN_LAYOUT, doc, 60000, call));
+      if (!d.layers?.length) throw new KitError(`The composition "${d.name}" has no layers with sound. To hear a file that isn't in it (a song to time to), pass its path.`, "NO_AUDIO");
+      const r = await listenTimeline(kit.ear, compLayout(d), opts);
+      heard.set(r.heard);
+      return { text: r.text, picture: r.picture, heard: r.heard };
+    },
 
     async exportCopy({ doc, format, name, outputDir }, call?: CallOptions): Promise<FileResult> {
       const f = String(format || "png").toLowerCase();

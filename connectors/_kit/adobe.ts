@@ -4,6 +4,8 @@
 // rest (process facts, scratch folder, incident log, dialog watch, output rules).
 import type { AppStatus, DocRef, Platform } from "../../protocol/common.ts";
 import type { FileResult, Picture, RunResult } from "../../protocol/connector.ts";
+import { createEar } from "./audio.ts";
+import type { Decoder, Ear } from "./audio.ts";
 import { agentMayPress, createDialogWatcher, dialogText, hasModal, layersMeanDialog, modalWindow, readDialog } from "./dialogwatch.ts";
 import type { DialogWatcher } from "./dialogwatch.ts";
 import type { Envelope } from "./envelope.ts";
@@ -52,6 +54,9 @@ export interface ConnectorOptions {
   /** Is the person in this app right now (core/runtime/frontapp.ts)? A dialog that comes up
    *  then is theirs: Komposit waits and never presses it. Default: never. */
   personIn?: (app: string) => boolean;
+  /** How listening decodes sound files (audio.ts). Default: the system's own decoders, then
+   *  ffmpeg when the person has it. Tests pass their own. */
+  audioDecoders?: Decoder[];
 }
 
 /** Optional last argument of the slow calls. Not in protocol/connector.ts yet. */
@@ -73,6 +78,9 @@ export interface Kit {
   dialogs: DialogWatcher;
   rules: OutputRules;
   renderMaxPx: number;
+  /** Listening: decodes and measures sound on this computer, and remembers it until the file
+   *  changes (audio.ts). One for all the connectors. */
+  ear: Ear;
 }
 
 export function createKit(platform: Platform, opts: ConnectorOptions = {}): Kit {
@@ -92,6 +100,7 @@ export function createKit(platform: Platform, opts: ConnectorOptions = {}): Kit 
     dialogs: createDialogWatcher(transport, { ...(opts.personIn ? { personIn: opts.personIn } : {}) }),
     rules: { exportDir: opts.exportDir, home: opts.home, allowedRoots: opts.allowedRoots, platform },
     renderMaxPx: Number(opts.renderMaxPx) > 0 ? Number(opts.renderMaxPx) : 1024,
+    ear: createEar({ scratchDir: () => scratch.dir(), platform, ...(opts.audioDecoders ? { decoders: opts.audioDecoders } : {}) }),
   };
 }
 

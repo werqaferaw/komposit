@@ -90,6 +90,7 @@ Add a **stdio** server that runs `node /path/to/komposit-mcp.mjs`. It speaks new
 | `inspect` | A map of the document (layers, items with refs for code, bounds, colors, fonts), the selection, and a picture. |
 | `edit` | Runs code in the app's own language (ExtendScript) against the document. Not saved. |
 | `render` | A picture of the result (After Effects and Premiere Pro: several frames, or a short preview video; Premiere Pro also watches a stretch as contact sheets). |
+| `listen` | Hears sound on this computer: Premiere Pro's sequence or After Effects' comp (each track's levels, speech stretches and pauses, who talks when, a song's tempo, every beat, bars, sections and strongest hits; Premiere Pro's transcripts when the project has them), or one media file with `path` (no app needed). Text plus a picture of the sound; the next `edit` gets it as `K.heard`. |
 | `export` | Writes a new file (png, jpg, svg, pdf, mp4, depending on the app). Never overwrites. |
 | `save` | Saves, only when you ask: the file itself, a copy, or as a new file. |
 | `undo` | Undoes the last step. |
@@ -110,6 +111,7 @@ Every app tool takes `app` (`illustrator`, `photoshop`, `aftereffects`, `premier
 - **Apps are never opened for you.** A call to an app that isn't open says so.
 - **Premiere Pro: only the project a change names, only while it's the active one.** Premiere's scripts reach whichever project is active, so `edit`, `undo`, `save`, `place` and a preview video need `doc`, and are refused (nothing sent) without it or when that project isn't the active one. An edit can't save, open, close or switch projects, or reach into the other open projects.
 - Pictures come back as MCP image content, so the AI sees them.
+- **Listening stays on this computer.** Sound is decoded by the system's own decoders (Core Audio and AVFoundation on a Mac, Media Foundation on Windows; WAV and AIFF are read directly) or by ffmpeg when you have it, measured with plain signal maths, and never sent anywhere. Set `KOMPOSIT_FFMPEG` to use a particular ffmpeg.
 
 ## Settings (environment variables)
 
@@ -120,6 +122,7 @@ Every app tool takes `app` (`illustrator`, `photoshop`, `aftereffects`, `premier
 | `KOMPOSIT_HELPER` | macOS: path to `komposit-helper` (see `helper/mac/`), so `apps` can read the Automation permission without asking. |
 | `KOMPOSIT_WIN_HELPER` | Windows: path to a built `komposit-win.exe`, the helper the connectors use for their system calls on Windows. |
 | `AE_APP` | macOS: an unusual After Effects app name. |
+| `KOMPOSIT_FFMPEG` | Path to an ffmpeg for listening to formats the system can't decode (optional; `ffmpeg` on the PATH is used when present). |
 
 Claude Desktop and Claude Code take them as `"env": { ... }` / `-e NAME=value`; Codex as `env = { NAME = "value" }`; OpenCode as `"environment": { ... }`.
 

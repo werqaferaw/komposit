@@ -23,7 +23,7 @@ function manifest(id: string, label: string, extra: Partial<ConnectorManifest["c
     platforms: ["mac", "win"],
     door: "os-script",
     language: "extendscript",
-    capabilities: { inspect: true, run: true, render: true, export: ["png", "pdf"], save: ["overwrite", "copy", "as"], undo: true, selection: true, newDocument: true, open: true, place: true, ...extra },
+    capabilities: { inspect: true, run: true, render: true, export: ["png", "pdf"], save: ["overwrite", "copy", "as"], undo: true, selection: true, newDocument: true, open: true, place: true, listen: true, ...extra },
   };
 }
 
@@ -72,6 +72,8 @@ function fake(m: ConnectorManifest, running: boolean): Connector {
     newDocument: (o) => op("newDocument", () => ({ app, name: o.name || "Untitled-1" })),
     open: (path) => op("open", () => ({ app, name: path.split(/[\\/]/).pop() || "x", path })),
     place: (o) => op("place", () => ({ ok: true, path: o.file })),
+    // A file is heard without the app; the timeline needs it.
+    listen: (o, doc) => op("listen", () => ({ text: o.path ? `Sound of ${o.path.split(/[\\/]/).pop()}: 120 BPM.` : `Sound of ${doc?.name || docs[0]!.name}: a voice.`, picture: { bytes: tinyPng(6, 2), mime: "image/png" as const } }), { path: o.path ?? null }),
     guide: async (topic) => (topic ? `${m.label} recipes: ${topic}\n\nUse doc.pathItems.rectangle(top, left, w, h).` : `${m.label} recipes\n\nTopics:\n- shapes: rectangles and ellipses`),
   };
   return c;

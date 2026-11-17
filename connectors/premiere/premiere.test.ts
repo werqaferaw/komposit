@@ -35,6 +35,9 @@ import { runIn, standInPremiere, startStandInPanel, Time, TPS } from "./standin.
 import type { StandInPanel, StandInPremiere } from "./standin.ts";
 import { summarizeSelection } from "./summary.ts";
 import { K_HELPERS, K_LIB } from "./toolkit.ts";
+import { writeWav } from "../_kit/audio.ts";
+import { drumTrack, speechLike } from "../_kit/soundfixtures.ts";
+import { projectWithTranscript } from "../_kit/transcriptfixture.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const made: string[] = [];
@@ -791,14 +794,14 @@ test("K: one line, parses without touching Premiere, has every helper the guide 
   const K = new Function(`${K_LIB} return K;`)();
   assert.deepEqual(Object.keys(K).sort(), [...K_HELPERS].sort());
   const guide = readFileSync(join(HERE, "guide.md"), "utf8");
-  for (const m of guide.matchAll(/\bK\.(\w+)/g)) assert.equal(typeof K[m[1]!], "function", `the guide names K.${m[1]}`);
+  for (const m of guide.matchAll(/\bK\.(\w+)/g)) if (m[1] !== "heard") assert.equal(typeof K[m[1]!], "function", `the guide names K.${m[1]}`);
   for (const name of ["clip", "seq", "findItem", "effects", "addEffect", "settings", "set", "keys", "transition", "volume", "volumeKeys", "speed", "razor", "remove", "disable", "addTracks", "importFiles", "tc", "snap", "captions", "template", "qeClip", "multicam", "removeRanges", "duck", "backup"]) {
     assert.ok(guide.includes(`K.${name}`), `the guide shows K.${name}`);
   }
   assert.equal(K.levelToDb(K.dbToLevel(-6)), -6, "volume in dB round-trips (0 dB is stored as 0.1778)");
   assert.doesNotMatch(K_LIB, /\?\s*(qs|qe|P|q)\.\w+\(/);
   assert.doesNotMatch(K_LIB, /:\s*(qs|qe|P)\.get\w+\(/);
-  assert.ok(!/heard|findWords/.test(K_LIB), "nothing that needs listening");
+  assert.equal(K.heard, null, "K.heard is filled in only for an edit that uses it");
 });
 
 test("K against the stand-in: cameras cut, stretches taken out, music ducked, a backup kept, captions never over a file", async () => {
@@ -852,7 +855,7 @@ test("K against the stand-in: cameras cut, stretches taken out, music ducked, a 
 
 // ---------- guide, scripts, pictures ----------
 
-test("guide: 1.0's Premiere recipes word for word, except the ones that need listening; an index and topics", async () => {
+test("guide: 1.0's Premiere recipes word for word (listening's in v2's own words); an index and topics", async () => {
   const m = loadConnectors("mac", { transport: createFakeTransport(), scratchDir: tmp("kp-pr-guide-") });
   const g = m.get("premiere")!.guide!;
   const index = await g();
@@ -873,12 +876,14 @@ test("guide: 1.0's Premiere recipes word for word, except the ones that need lis
   assert.ok(lines.length > 20);
   for (const l of lines) {
     if (LISTENING.some((p) => l.startsWith(p))) {
-      assert.ok(!guide.includes(l), `left out until v2 can listen: ${l.slice(0, 60)}`);
+      // (back in v2, in its own words: checked below)
       continue;
     }
     assert.ok(guide.includes(l), `the guide is missing: ${l.slice(0, 80)}`);
   }
-  assert.ok(!/K\.heard|listen tool|K\.findWords/.test(guide));
+  for (const t of ["listen with path", "K.heard holds what it heard", "K.findWords('a phrase')", "K.cutOnBeats(", "K.beats(", "K.markBeats(", "K.markSections()"]) assert.ok(guide.includes(t), t);
+  assert.match(await g("cut to the beat"), /Plan the cuts on its structure/);
+  assert.match(await g("story"), /Follow the music's sections/);
 });
 
 test("what goes to Premiere is ES3: no let, const, arrows, template strings or ES5 library calls", () => {
@@ -887,6 +892,7 @@ test("what goes to Premiere is ES3: no let, const, arrows, template strings or E
   const sources = [
     K_LIB, g.before!, g.setup!, S.DOCUMENTS, S.INSPECT, S.SELECTION, S.SEQ_INFO, S.frames([null, 2], ["/a.png", "/b.png"]), S.watch([1], ["/a.png"]), S.restoreEvents("true"),
     S.encode("/o.mp4", true), S.encode("/o.mp4", false), S.SAVE_OVERWRITE, S.saveAs("/n.prproj"), S.saveCopy("/c.prproj"), S.ACTIVE_SEQUENCE_NAME, S.undo(2), S.place("/f.png"), S.open("/p.prproj"),
+    S.LISTEN_LAYOUT, S.PROJECT_PATH,
   ];
   for (const s of sources) {
     const { bare } = maskCode(s);
@@ -972,4 +978,136 @@ test("the request's sequence by id: edits, info and video stay on it when the pe
   } finally {
     await r.done();
   }
+});
+
+// ---------- listening ----------
+
+/** The stand-in's mics as sound files (the host, then the guest, each heard faintly on the
+ *  other's mic), a song at 120 BPM on a third audio track from 2.25 s into it (a bar line),
+ *  and the project saved with the host mic transcribed. */
+function soundStage(r: Rig) {
+  const media = r.pr.dirs.mediaDir, R = 16000;
+  const host = speechLike([[0.5, 6], [12, 16]], { seconds: 20, seed: 4 });
+  const guest = speechLike([[6.8, 11.4]], { seconds: 20, seed: 9, pitch: 210 });
+  writeWav(join(media, "host mic.wav"), [host.map((v, i) => v + 0.1 * guest[i]!)], R);
+  writeWav(join(media, "guest mic.wav"), [guest.map((v, i) => v + 0.1 * host[i]!)], R);
+  const song = drumTrack({ bpm: 120, seconds: 30 });
+  writeWav(join(media, "song.wav"), [song.x], R);
+  const seq = r.pr.show.activeSequence;
+  seq._addTrack("audio", "Music")._add(seq._clip("song.wav", 0, 20, join(media, "song.wav"), 2.25));
+  writeFileSync(r.pr.show.path, projectWithTranscript("host mic.wav", join(media, "host mic.wav")));
+  return { seq, song: join(media, "song.wav") };
+}
+
+test("listen: the sequence's sound (each mic, who talks, the song's beats and bars in sequence seconds), the words from the saved project, and K.heard in the next edits", async () => {
+  const r = await rig({ kit: { audioDecoders: [] } });
+  try {
+    const { seq } = soundStage(r);
+    const before = sent(r);
+    const l = await r.c.listen!({}, SHOW(r.pr));
+    assert.equal(sent(r) - before, 1, "one read of the sequence");
+    assert.match(l.text, /^Sound of the sequence "Podcast" \(20 s\), as recorded: before volume, mutes and effects\./);
+    assert.match(l.text, /A1 "Audio 1", host mic\.wav: a voice, talking \d+% of the time/);
+    assert.match(l.text, /A2 "Audio 2", guest mic\.wav: a voice/);
+    assert.match(l.text, /A3 "Music", song\.wav: music/);
+    assert.match(l.text, /Steady beat: about 120(\.\d)? BPM/);
+    assert.match(l.text, /Who is talking \(each mic against its own level, held 0\.8 s\): 0–6\.\d+ A1 · 6\.\d+–1[12]\.\d+ A2 · 1[12]\.\d+–20 A1/);
+    assert.match(l.text, /Words \(Premiere Pro's transcript; .*\n\[0–2\.5 Host\] What's up guys\. Welcome\n\[4–5\.2 Speaker 2\] Thanks for having me\./);
+    assert.equal(l.picture?.mime, "image/png");
+    const h = l.heard as any;
+    assert.equal(h.id, "seq-doc-1");
+    assert.equal(h.beats.track, 2);
+    assert.ok(Math.abs(h.beats.times[0]) <= 0.03, "2.25 s into the song is a beat, and it sits at 0 on the sequence");
+    // The next edit that uses it gets K.heard; one that doesn't, doesn't.
+    const bars = await r.c.run("return K.beats({ bars: true, to: 8 });", SHOW(r.pr));
+    assert.deepEqual(bars, { ok: true, result: [0, 2, 4, 6, 8], logs: [] });
+    assert.ok(r.panel!.scripts[r.panel!.scripts.length - 1]!.includes("K.heard = {"));
+    await r.c.run("return 1;", SHOW(r.pr));
+    assert.ok(!r.panel!.scripts[r.panel!.scripts.length - 1]!.includes("K.heard = {"), "only edits that use it carry it");
+    // Every beat, on the sequence's frames (25 fps: 3.5 s isn't a frame, so 3.48 or 3.52).
+    const some = (await r.c.run("return K.beats({ from: 3, to: 5 });", SHOW(r.pr))).result as number[];
+    assert.equal(some.length, 5);
+    [3, 3.5, 4, 4.5, 5].forEach((t, i) => assert.ok(Math.abs(some[i]! - t) <= 0.04 && Math.abs(Math.round(some[i]! * 25) - some[i]! * 25) < 1e-6, `${some[i]} for ${t}`));
+    assert.deepEqual((await r.c.run("return K.findWords('thanks for');", SHOW(r.pr))).result, [{ start: 4, end: 4.5, index: 4 }]);
+    // Markers on the bars, for the person to see.
+    const mk = await r.c.run("return K.markBeats({ bars: true, to: 6 });", SHOW(r.pr));
+    assert.deepEqual(mk.result, { markers: 4, from: 0, to: 6 });
+    assert.deepEqual(seq._markers.map((m: any) => [m.start.seconds, m.name]), [[0, "Bar 1"], [2, "Bar 2"], [4, "Bar 3"], [6, "Bar 4"]]);
+  } finally {
+    await r.done();
+  }
+});
+
+test("K.cutOnBeats: shots one after another, each cut on a beat, on a free pair of tracks; the music untouched; their own sound taken out", async () => {
+  const r = await rig({ kit: { audioDecoders: [] } });
+  try {
+    const { seq } = soundStage(r);
+    for (const n of ["beach.mp4", "city.mp4", "face.mp4"]) { const it = r.pr.item(n, join(r.pr.dirs.mediaDir, n)); it._audio = true; r.pr.show.rootItem.children.push(it); }
+    await r.c.listen!({}, SHOW(r.pr));
+    const music = () => seq.audioTracks[2].clips.map((c: any) => `${c.name}@${c.start.seconds}-${c.end.seconds}`).join(",");
+    const was = music();
+    const cut = await r.c.run("return K.cutOnBeats([{ item: 'beach.mp4', src: 3, beats: 4 }, { item: 'city.mp4', src: 1.5, beats: 2 }, { item: 'face.mp4', src: 0, beats: 2 }], { from: 4 });", SHOW(r.pr));
+    assert.equal(cut.ok, true, cut.error);
+    const res = cut.result as any;
+    assert.equal(res.cuts, 3);
+    assert.equal(res.track, "V4", "V1-V3 or their audio tracks are busy there, so a new pair was added");
+    assert.deepEqual(res.shots.map((s: any) => [s.name, s.start, s.end, s.src]), [["beach.mp4", 4, 6, 3], ["city.mp4", 6, 7, 1.5], ["face.mp4", 7, 8, 0]]);
+    assert.equal(res.sound, "removed (the shots' own sound)");
+    assert.ok(!res.warning, res.warning);
+    assert.deepEqual(seq.videoTracks[3].clips.map((c: any) => [c.name, c.start.seconds, c.end.seconds, c.inPoint.seconds]), [["beach.mp4", 4, 6, 3], ["city.mp4", 6, 7, 1.5], ["face.mp4", 7, 8, 0]]);
+    assert.equal(seq.audioTracks[3].clips.length, 0, "their sound came onto A4 and was taken out");
+    assert.equal(music(), was, "the music is as it was");
+    // A track whose audio track holds the music is refused before anything is placed.
+    const busy = await r.c.run("return K.cutOnBeats([{ item: 'beach.mp4', beats: 4 }], { track: 2, from: 10 });", SHOW(r.pr));
+    assert.equal(busy.ok, false);
+    assert.match(busy.error!, /A3 has clips between 10 and 12 s, and the shots' own sound would land over them/);
+    // More shots than beats: the ones that fit, and how many didn't.
+    const late = await r.c.run("return K.cutOnBeats([{ item: 'beach.mp4', beats: 8 }, { item: 'city.mp4', beats: 8 }], { from: 14, track: 3 });", SHOW(r.pr));
+    assert.equal(late.ok, true, late.error);
+    assert.equal((late.result as any).cuts, 1, "the music ends at 20 s: room for one 8-beat shot from 14 s");
+    assert.equal((late.result as any).left, "1 shot did not fit before the beats ran out");
+  } finally {
+    await r.done();
+  }
+});
+
+test("listen to a file by its path: its sound and its words, in its own seconds; the helpers then need where it starts", async () => {
+  const r = await rig({ kit: { audioDecoders: [] } });
+  try {
+    const { song } = soundStage(r);
+    const l = await r.c.listen!({ path: song }, SHOW(r.pr));
+    assert.match(l.text, /^Sound of song\.wav: 30 s, mono\./);
+    assert.match(l.text, /beats from 0\.2\d to 29\.\d+ s in the file/);
+    assert.equal((l.heard as any).what, "file");
+    const no = await r.c.run("return K.beats({ bars: true });", SHOW(r.pr));
+    assert.match(no.error!, /K\.heard is the file song\.wav, in its own seconds: pass at \(where the song starts on the timeline\) and songIn/);
+    assert.deepEqual((await r.c.run("return K.beats({ at: 10, songIn: 2.25, bars: true, to: 16 });", SHOW(r.pr))).result, [10, 12, 14, 16]);
+    // The host mic's file: its words, from the saved project, in the file's seconds.
+    const words = await r.c.listen!({ path: join(r.pr.dirs.mediaDir, "host mic.wav") }, SHOW(r.pr));
+    assert.match(words.text, /Words \(Premiere Pro's transcript of this file; times are seconds in the file/);
+    const other = await r.c.listen!({ path: join(r.pr.dirs.mediaDir, "guest mic.wav") }, SHOW(r.pr));
+    assert.match(other.text, /No words for this file: it isn't transcribed in the open Premiere Pro project .* Transcribed already: host mic\.wav\./);
+  } finally {
+    await r.done();
+  }
+  // Nothing on the sequence to hear: said plainly.
+  const empty = await rig({ kit: { audioDecoders: [] } });
+  try {
+    for (const t of empty.pr.show.activeSequence.audioTracks) t.clips.length = 0;
+    await assert.rejects(empty.c.listen!({}, SHOW(empty.pr)), /The sequence "Podcast" has no audio clips to listen to\. To hear a file that isn't on it \(a song to cut to\), pass its path\./);
+  } finally {
+    await empty.done();
+  }
+});
+
+test("K's listening helpers refuse beats of another sequence, and say when nothing was heard", () => {
+  const make = (heard: unknown) => new Function("__kpTarget", "app", `${K_LIB} K.heard = ${JSON.stringify(heard)}; return K;`)(
+    () => ({ name: "Trailer", sequenceID: "seq-9", getSettings: () => ({ videoFrameRate: { ticks: String(TPS / 25), seconds: 1 / 25 } }) }),
+    { project: {} },
+  );
+  assert.throws(() => make(null).beats(), /Nothing heard yet: call listen first/);
+  assert.throws(() => make({ what: "sequence", name: "Podcast", id: "seq-1", beats: { times: [0, 0.5], bars: [0] } }).beats(), /K\.heard is of the sequence Podcast, not Trailer: listen to this one first\./);
+  assert.throws(() => make({ what: "sequence", name: "Trailer", id: "seq-9", beats: { times: [], bars: [] } }).beats(), /No steady beat was heard in Trailer: cut on K\.heard\.sections and K\.heard\.hits instead/);
+  assert.deepEqual(make({ what: "sequence", name: "Trailer", id: "seq-9", beats: { times: [0.01, 0.51, 1.02, 1.49], bars: [0.01] } }).beats({ every: 2 }), [0, 1.04]);
+  assert.throws(() => make({ what: "sequence", name: "Trailer", id: "seq-9" }).findWords("hi"), /No words to search: the clips must be transcribed in Premiere Pro/);
 });
