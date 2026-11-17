@@ -1,0 +1,19 @@
+komposit
+Copyright 2026 the Komposit authors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Third-party software
+--------------------
+
+The kit's code runs on Node.js and its built-in modules only; it bundles no
+third-party code. These packages are used to develop and build it, are not
+included in this repository, and keep their own licenses:
+
+- esbuild (MIT License), used to bundle komposit-mcp and the bridge
+  (npm run build, bridge/build.ts)
+- TypeScript (Apache License 2.0), used for the type check
+- @types/node (MIT License), type definitions for Node.js
+
+Illustrator, Photoshop, After Effects and Premiere Pro are the names of their owners' products.
+This project is not made, endorsed or supported by them.

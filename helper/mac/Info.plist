@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Embedded into the komposit-helper binary (__TEXT,__info_plist) by build.sh, so even
+     the bare program carries a name and the reasons macOS shows in its prompts. Inside
+     Komposit.app the app's own Info.plist is what macOS names in the prompt. -->
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key><string>dev.werq.komposit.helper</string>
+  <key>CFBundleName</key><string>Komposit</string>
+  <key>CFBundleShortVersionString</key><string>2.0.0</string>
+  <key>CFBundleVersion</key><string>2.0.0</string>
+  <key>LSUIElement</key><true/>
+  <key>NSAppleEventsUsageDescription</key><string>Komposit works in your creative apps to make the edits you ask for, in your open documents.</string>
+</dict>
+</plist>

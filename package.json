@@ -1,0 +1,42 @@
+{
+  "name": "komposit",
+  "version": "0.1.0",
+  "description": "Connectors that let any AI work inside Illustrator, Photoshop, After Effects and Premiere Pro, with a standalone MCP server and skills.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/werqaferaw/komposit"
+  },
+  "bin": {
+    "komposit-mcp": "out/mcp/komposit-mcp.mjs"
+  },
+  "files": [
+    "out/mcp",
+    "protocol",
+    "toolkit",
+    "connectors",
+    "mcp",
+    "skills",
+    "LICENSE",
+    "NOTICE",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test \"protocol/**/*.test.ts\" \"toolkit/**/*.test.ts\" \"connectors/**/*.test.ts\" \"mcp/**/*.test.ts\" \"skills/**/*.test.ts\" \"bridge/**/*.test.ts\"",
+    "test:helper": "node --test helper/mac/smoke.test.ts",
+    "typecheck": "tsc --noEmit -p .",
+    "check:boundaries": "node scripts/check-boundaries.mjs",
+    "check": "npm run typecheck && npm run check:boundaries && npm test",
+    "build": "node scripts/build.mjs",
+    "build:helper": "helper/mac/build.sh"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "esbuild": "0.28.2",
+    "typescript": "7.0.2"
+  }
+}
